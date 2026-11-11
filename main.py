@@ -51,14 +51,22 @@ def import_matches(client, db, puuid, max_games, queue):
     return imported
 
 
-def export_champions(db, output='data/champion_stats.csv'):
+def export_champions(db, queue=400, output=None):
+    if output is None:
+        output = f'data/champion_stats_{queue}.csv'
+
     rows = db.execute('''SELECT champion, COUNT(*) games, SUM(win) wins,
         ROUND(100.0*AVG(win),1) win_rate,
         ROUND(AVG(kills),2) avg_kills, ROUND(AVG(deaths),2) avg_deaths,
         ROUND(AVG(assists),2) avg_assists, ROUND(AVG(gold),0) avg_gold,
         ROUND(AVG(damage),0) avg_damage, ROUND(AVG(cs),1) avg_cs,
         ROUND(AVG(vision),1) avg_vision
-        FROM matches GROUP BY champion ORDER BY games DESC, win_rate DESC''').fetchall()
+        FROM matches
+        WHERE queue_id = ?
+        GROUP BY champion
+        ORDER BY games DESC, win_rate DESC
+        ''', (queue,)).fetchall()
+    
     columns = ['champion','games','wins','win_rate_pct','avg_kills','avg_deaths',
                'avg_assists','avg_gold','avg_damage','avg_cs','avg_vision']
     Path(output).parent.mkdir(parents=True, exist_ok=True)
@@ -73,6 +81,13 @@ def export_champions(db, output='data/champion_stats.csv'):
 def main():
     parser = argparse.ArgumentParser(description='RiftMetrics League of Legends tracker')
     parser.add_argument('--games', type=int, default=20, help='Max recent ranked matches to examine')
+    parser.add_argument(
+        '--queue',
+        type=int,
+        choices=[400, 420],
+        default=400,
+        help='400 = Normal Draft, 420 = Ranked Solo/Duo'
+    )
     parser.add_argument('--export-only', action='store_true', help='Regenerate CSV without contacting Riot')
     args = parser.parse_args()
     if args.games < 1 or args.games > 1000:
@@ -84,7 +99,7 @@ def main():
             name, tag = os.getenv('RIOT_GAME_NAME', 'Destro493'), os.getenv('RIOT_TAG_LINE', 'NA1')
             account = client.account(name, tag)
             print(f'Found {account["gameName"]}#{account["tagLine"]}')
-            count = import_matches(client, db, account['puuid'], args.games, int(os.getenv('RIOT_QUEUE', '420')))
+            count = import_matches(client, db, account['puuid'], args.games, args.queue)
             print(f'New matches stored: {count}')
             ranked = client.ranked(account['puuid'])
             for entry in ranked:
@@ -96,7 +111,7 @@ def main():
                       entry.get('rank'), entry.get('leaguePoints'), entry.get('wins'), entry.get('losses')))
                 db.commit()
                 print(f'Rank: {entry.get("tier")} {entry.get("rank")} {entry.get("leaguePoints")} LP')
-        export_champions(db)
+        export_champions(db, args.queue)
 
 if __name__ == '__main__':
     try:

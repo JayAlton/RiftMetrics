@@ -9,6 +9,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from riftmetrics.api import RiotClient, RiotAPIError
 from riftmetrics.storage import connect, stored_ids
+from riftmetrics.champions import normalize_champion_name
 
 
 def import_matches(client, db, puuid, max_games, queue):
@@ -28,13 +29,14 @@ def import_matches(client, db, puuid, max_games, queue):
             if player is None:
                 continue
             played = datetime.fromtimestamp(info['gameStartTimestamp'] / 1000, timezone.utc).isoformat()
+            champion = normalize_champion_name(player['championName'])
             cs = player.get('totalMinionsKilled', 0) + player.get('neutralMinionsKilled', 0)
             duration = info.get('gameDuration', 0)
             db.execute('''INSERT OR IGNORE INTO matches
               (match_id, played_at, queue_id, champion, role, win, kills, deaths, assists, cs,
                gold, damage, vision, duration_seconds, raw_json)
               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-              (match_id, played, info.get('queueId'), player['championName'],
+              (match_id, played, info.get('queueId'), champion,
                player.get('teamPosition') or player.get('individualPosition'), int(player['win']),
                player['kills'], player['deaths'], player['assists'], cs, player['goldEarned'],
                player['totalDamageDealtToChampions'], player.get('visionScore', 0), duration,
@@ -42,7 +44,7 @@ def import_matches(client, db, puuid, max_games, queue):
             db.commit()
             known.add(match_id)
             imported += 1
-            print(f'Imported {match_id}: {player["championName"]} {"W" if player["win"] else "L"}')
+            print(f'Imported {match_id}: {champion} {"W" if player["win"] else "L"}')
             time.sleep(1.3)  # Conservative pacing under personal-key app limits.
         if len(ids) < min(100, max_games - start):
             break

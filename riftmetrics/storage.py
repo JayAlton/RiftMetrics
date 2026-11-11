@@ -18,6 +18,14 @@ def connect(path='data/riftmetrics.db'):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(path)
     db.executescript(SCHEMA)
+
+    # Normalize champion names in existing records
+    db.execute(
+        "UPDATE matches SET champion = ? WHERE champion = ?",
+        ("Wukong", "MonkeyKing")
+    )
+    db.commit()
+
     return db
 
 

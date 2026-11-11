@@ -50,7 +50,11 @@ def load_matches(path: str, modified: float):
     df["enemy_jungler"] = df["details"].map(lambda x: x.get("enemy_jungler") or "Unknown")
     df["team_dragons"] = df["details"].map(lambda x: (x.get("team_objectives") or {}).get("dragon"))
     df["team_barons"] = df["details"].map(lambda x: (x.get("team_objectives") or {}).get("baron"))
-    df["date"] = pd.to_datetime(df["played_at"], utc=True).dt.strftime("%b %d, %Y")
+    df["date"] = pd.to_datetime(
+    df["played_at"],
+        format="ISO8601",
+        utc=True
+    ).dt.strftime("%b %d, %Y")
     return df
 
 

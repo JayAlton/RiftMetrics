@@ -5,6 +5,17 @@ from riftmetrics.draft_scoring import score_pool, load_external_priors
 
 
 class DraftScoringTests(unittest.TestCase):
+    def test_default_combines_normal_and_ranked_jungle_history(self):
+        def row(queue, win, role='JUNGLE', enemy='Kayn'):
+            return dict(champion='Warwick', queue_id=queue, role=role, win=win, enemy_jungler=enemy)
+        rows = [row(400, 1), row(420, 0), row(420, 1, enemy='Lillia'),
+                row(450, 1), row(440, 1), row(400, 1, role='TOP')]
+        result = score_pool(rows, ['Warwick'], 'Kayn')[0]
+        self.assertEqual((result['games'], result['wins']), (3, 2))
+        self.assertAlmostEqual(result['personal_wr'], 2 / 3)
+        self.assertEqual((result['matchup_games'], result['matchup_wins']), (2, 1))
+        self.assertAlmostEqual(result['personal_weight'], .15 * (.3 ** 2) / 3)
+
     def personal_rows(self, count, win=1):
         return [dict(champion='Briar', role='JUNGLE', queue_id=420,
                      win=win, enemy_jungler='Lillia') for _ in range(count)]
@@ -34,7 +45,7 @@ class DraftScoringTests(unittest.TestCase):
             dict(champion="Warwick", role="TOP", queue_id=400, win=0, enemy_jungler="Kayn"),
             dict(champion="Warwick", role="JUNGLE", queue_id=420, win=0, enemy_jungler="Kayn"),
         ]
-        score = score_pool(rows, ["Warwick"], "Kayn")[0]
+        score = score_pool(rows, ["Warwick"], "Kayn", queue_id=400)[0]
         self.assertEqual((score["games"], score["wins"], score["matchup_games"]), (1, 1, 1))
 
     def test_external_weight_and_sample_confidence(self):

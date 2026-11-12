@@ -1,6 +1,6 @@
 """Transparent, sample-size-aware RiftMetrics jungle draft recommendations."""
 
-DEFAULT_POOL = ["Briar", "Darius", "Warwick", "Kayn", "Wukong", "Xin Zhao", "Lillia", "Master Yi", "Jax", "Ekko", "Diana", "Rammus"]
+DEFAULT_POOL = ["Warwick", "Kayn", "Wukong", "Xin Zhao", "Lillia", "Master Yi", "Jax"]
 
 
 def norm(value):
@@ -13,19 +13,21 @@ def load_external_priors(path, context=None):
     return blend_records(read_records(path), context)
 
 
-def score_pool(rows, pool, enemy_jungler=None, priors=None, queue_id=400, external_weight=.90, matchup_weight=.95, personal_max_weight=.15):
+def score_pool(rows, pool, enemy_jungler=None, priors=None, queue_id=None, external_weight=.90, matchup_weight=.95, personal_max_weight=.15):
     """Blend external matchup evidence, limited personal history and neutral uncertainty.
 
+    With no queue override, combine Normal Draft (400) and Solo/Duo (420).
     Personal history has a sample-scaled budget: at the default 15% maximum,
     fewer than 10 games contributes under 5%, 10 games contributes 5%, and
     30+ games contributes at most 15%. Missing evidence stays neutral.
     """
     priors = priors or {}
     enemy_key = norm(enemy_jungler)
+    queues = (400, 420) if queue_id is None else (queue_id,)
     eligible = []
     for row in rows:
         role = str(row.get("role") or "").upper()
-        if role != "JUNGLE" or int(row.get("queue_id") or 0) != queue_id:
+        if role != "JUNGLE" or int(row.get("queue_id") or 0) not in queues:
             continue
         eligible.append(row)
     scores = []

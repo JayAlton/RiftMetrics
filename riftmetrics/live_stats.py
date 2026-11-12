@@ -9,6 +9,7 @@ import re
 import time
 import requests
 from riftmetrics.draft_scoring import norm
+from riftmetrics.rank_groups import resolve_ranks
 
 CACHE = Path(__file__).resolve().parents[1] / 'data' / 'source_cache'
 TTL = 6 * 3600
@@ -102,6 +103,71 @@ class Images(HTMLParser):
             self.items.append(dict(id=int(item[1]), name=attrs['alt']))
 
 
+class RuneImages(HTMLParser):
+    """Only highlighted choices from the source rune summary."""
+    def __init__(self): super().__init__(); self.runes = []
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        match = re.search(r'/(rune68|statmod32)/(\d+)\.', attrs.get('src', ''))
+        if tag != 'img' or not match or 'grayscale' in attrs.get('class', ''):
+            return
+        shards = {5001: 'Health scaling', 5002: 'Armor', 5003: 'Magic resist',
+                  5005: 'Attack speed', 5007: 'Ability haste', 5008: 'Adaptive force',
+                  5010: 'Move speed', 5011: 'Health', 5013: 'Tenacity and slow resist'}
+        ident = int(match[2])
+        name = shards.get(ident, f'Stat shard {ident}') if match[1] == 'statmod32' else attrs.get('alt')
+        if name:
+            self.runes.append(dict(id=ident, name=name, image=attrs['src']))
+
+
+def parse_item_options(section):
+    matches = list(re.finditer(r'<img\b[^>]*>', section))
+    items = []
+    for index, match in enumerate(matches):
+        images = Images(); images.feed(match[0])
+        if not images.items:
+            continue
+        item = images.items[0]
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(section)
+        stats = re.search(r'(\d+(?:\.\d+)?)\s*%\s*(?:Win Rate\s*)?([\d,]+)', text(section[match.end():end]))
+        if stats:
+            rate, games = float(stats[1]), int(stats[2].replace(',', ''))
+            if 0 <= rate <= 100 and games > 0:
+                item.update(win_rate_pct=rate, games=games)
+        items.append(item)
+    return items
+
+
+def parse_build(html):
+    """Parse the visible matchup summary, excluding scripts and unrelated tables."""
+    html = re.sub(r'<(script|style)\b[^>]*>.*?</\1>', '', html, flags=re.S | re.I)
+    html = re.sub(r'<!--.*?-->', '', html, flags=re.S)
+    build = dict(core=[], item_options={}, runes={'primary': [], 'secondary': [], 'shards': []})
+    boundaries = [('Core Build', 'Item 4'), ('Item 4', 'Item 5'),
+                  ('Item 5', 'Item 6'), ('Item 6', 'Summoner Spells')]
+    for label, end in boundaries:
+        end_pattern = r'Summoner(?:\s|<[^>]*>)*Spells' if end == 'Summoner Spells' else re.escape(end)
+        section = re.search(re.escape(label) + r'(.*?)' + end_pattern, html, re.S)
+        if section:
+            items = parse_item_options(section[1])
+            if label == 'Core Build':
+                build['core'] = items[:3]
+            else:
+                build['item_options'][label] = items
+    for name, start, end in [('primary', 'Primary Runes', 'Secondary'),
+                             ('secondary', 'Secondary', 'Stat Mods'),
+                             ('shards', 'Stat Mods', 'Starting Items')]:
+        section = re.search(re.escape(start) + r'(.*?)' + re.escape(end), html, re.S)
+        if section:
+            parser = RuneImages(); parser.feed(section[1])
+            build['runes'][name] = parser.runes
+    # An incomplete highlight set is unavailable, rather than a guessed rune page.
+    for name, count in [('primary', 4), ('secondary', 2), ('shards', 3)]:
+        if len(build['runes'][name]) != count:
+            build['runes'][name] = []
+    return build
+
+
 def parse_lolalytics(html, champion, enemy, url, rank='Iron'):
     visible = text(html)
     heading = re.search(r'([\w\s\'&.]+) jungle vs ([\w\s\'&.]+) jungle Build & Runes', visible)
@@ -154,21 +220,23 @@ def fetch_one(source, champion, enemy, cache_dir=CACHE, force=False, rank='Iron'
         except OSError:
             pass
     if not result.get('html'):
-        return dict(source=source, champion=champion, error=result.get('error', 'No source data'), record=None, items=[])
+        return dict(source=source, champion=champion, requested_rank=rank, error=result.get('error', 'No source data'), record=None, items=[])
     try:
         parser = parse_opgg if source == 'OP.GG' else parse_lolalytics
         row, items = parser(result['html'], champion, enemy, url, rank)
         row['updated_at'] = datetime.fromtimestamp(result['fetched_at'], timezone.utc).date().isoformat()
         stale = now - result['fetched_at'] >= TTL
-        return dict(source=source, champion=champion, record=row, items=items,
+        build = parse_build(result['html']) if source == 'Lolalytics' else None
+        return dict(source=source, champion=champion, requested_rank=rank, record=row, items=items, build=build,
                     fetched_at=result['fetched_at'], stale=stale,
                     error=result.get('error'))
     except ValueError as exc:
-        return dict(source=source, champion=champion, error=f'{source}: {exc}', record=None, items=[])
+        return dict(source=source, champion=champion, requested_rank=rank, error=f'{source}: {exc}', record=None, items=[])
 
 
 def fetch_pool(pool, enemy, sources=SOURCES, cache_dir=CACHE, force=False, rank='Iron'):
-    jobs = [(source, champion) for champion in dict.fromkeys(pool) for source in sources]
-    def run(job): return fetch_one(job[0], job[1], enemy, cache_dir, force, rank)
+    jobs = [(source, champion, tier) for champion in dict.fromkeys(pool)
+            for source in sources for tier in resolve_ranks(rank)]
+    def run(job): return fetch_one(job[0], job[1], enemy, cache_dir, force, job[2])
     with ThreadPoolExecutor(max_workers=6) as executor:
         return list(executor.map(run, jobs))

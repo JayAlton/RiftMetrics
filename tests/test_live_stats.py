@@ -5,7 +5,7 @@ import time
 import unittest
 from unittest.mock import Mock, patch
 import requests
-from riftmetrics.live_stats import fetch_one, parse_lolalytics, parse_opgg, page, RANKS, LOL_RANK_LABELS
+from riftmetrics.live_stats import fetch_one, parse_lolalytics, parse_opgg, parse_build, page, RANKS, LOL_RANK_LABELS
 
 LOL = '''<script>Wrong 99% Win Rate 999 Games</script>
 <div>IRON Patch 16.22</div><h2>Briar jungle vs Lillia jungle Build &amp; Runes</h2>
@@ -17,6 +17,34 @@ Search a champion Win rate Games Lee Sin 52.0% 200 Lillia 48.5% 1,234 Ekko 51.0%
 
 
 class LiveStatsTests(unittest.TestCase):
+    def test_full_build_slot_boundaries_stats_and_selected_runes(self):
+        def item(ident, name):
+            return f'<img src="https://cdn5.lolalytics.com/item64/{ident}.webp" alt="{name}">51.5% 42'
+        def rune(ident, name, disabled=False, kind='rune68'):
+            return f'<img src="https://cdn5.lolalytics.com/{kind}/{ident}.webp" alt="{name}" class="{"grayscale opacity-70" if disabled else ""}">'
+        html = ('Core Build' + item(1, 'Core') + 'Item 4' + item(2, 'Fourth') + item(3, 'Alternative') +
+                'Item 5' + item(4, 'Fifth') + 'Item 6' + item(5, 'Sixth') +
+                '<div>Summoner</div><div>Spells</div>' + item(99, 'Unrelated') +
+                'Primary Runes' + ''.join(rune(i, f'Primary {i}') for i in range(8000, 8004)) +
+                rune(8888, 'Not selected', True) + 'Secondary' + rune(8100, 'Secondary A') +
+                rune(8101, 'Secondary B') + 'Stat Mods' +
+                ''.join(rune(i, 'statmod', kind='statmod32') for i in [5005, 5008, 5008]) +
+                'Starting Items' + '<script>Item 4' + item(999, 'Injected') + 'Item 5</script>')
+        build = parse_build(html)
+        self.assertEqual([i['id'] for i in build['item_options']['Item 4']], [2, 3])
+        self.assertEqual([i['id'] for i in build['item_options']['Item 6']], [5])
+        self.assertEqual(build['item_options']['Item 5'][0]['games'], 42)
+        self.assertEqual(build['core'][0]['win_rate_pct'], 51.5)
+        self.assertEqual(len(build['runes']['primary']), 4)
+        self.assertNotIn('Not selected', str(build['runes']))
+        self.assertEqual(len(build['runes']['secondary']), 2)
+        self.assertEqual([r['name'] for r in build['runes']['shards']], ['Attack speed', 'Adaptive force', 'Adaptive force'])
+
+    def test_incomplete_rune_choices_are_not_guessed(self):
+        build = parse_build('Primary Runes<img src="https://cdn5.lolalytics.com/rune68/8005.webp" alt="One choice">Secondary Stat Mods Starting Items')
+        self.assertEqual(build['runes']['primary'], [])
+        self.assertEqual(build['item_options'], {})
+
     def test_all_ranks_have_distinct_urls_and_verified_source_labels(self):
         self.assertTrue({'Iron', 'Bronze', 'Silver', 'Gold', 'Platinum', 'Emerald',
                          'Diamond', 'Master', 'Grandmaster', 'Challenger', 'All ranks'} <= set(RANKS))

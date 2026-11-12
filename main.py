@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from riftmetrics.api import RiotClient, RiotAPIError
 from riftmetrics.storage import connect, stored_ids
 from riftmetrics.champions import normalize_champion_name
+from riftmetrics.detail_storage import backfill
 
 
 def import_matches(client, db, puuid, max_games, queue):
@@ -101,6 +102,10 @@ def main():
             print(f'Found {account["gameName"]}#{account["tagLine"]}')
             count = import_matches(client, db, account['puuid'], args.games, args.queue)
             print(f'New matches stored: {count}')
+            detailed, failed = backfill(db, name, tag, puuid=account['puuid'])
+            print(f'New detailed records: {detailed}')
+            for match_id, reason in failed:
+                print(f'Could not parse details for {match_id}: {reason}')
             ranked = client.ranked(account['puuid'])
             for entry in ranked:
                 if entry.get('queueType') != 'RANKED_SOLO_5x5':

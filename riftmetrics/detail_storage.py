@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS match_details (
 """
 
 
-def backfill(db, game_name, tag_line):
+def backfill(db, game_name, tag_line, *, puuid=None):
     db.execute(DETAILS_SCHEMA)
     rows = db.execute("""
         SELECT m.match_id, m.raw_json
@@ -33,7 +33,8 @@ def backfill(db, game_name, tag_line):
     failed = []
     for match_id, raw_json in rows:
         try:
-            details = parse_match(json.loads(raw_json), game_name=game_name, tag_line=tag_line)
+            details = parse_match(json.loads(raw_json), puuid=puuid,
+                                  game_name=game_name, tag_line=tag_line)
             if details['match_id'] != match_id:
                 raise ValueError('Match ID mismatch')
             db.execute(

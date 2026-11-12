@@ -6,7 +6,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 from riftmetrics.draft_assistant import render_live_draft
-from riftmetrics.live_stats import RANKS
+from riftmetrics.rank_ui import select_rank_scope
 from riftmetrics.static_data import (
     QUEUE_NAMES, ROLE_NAMES, champion_image, get_version, item_image,
     readable_champion,
@@ -24,8 +24,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 st.title("🎯 RiftMetrics")
 st.caption("Your draft and ranked performance • Champion matchups • Stored locally in SQLite")
-stats_rank = st.sidebar.selectbox("External data rank", list(RANKS), key="draft_stats_rank",
-                                 help="Choose any rank for automatic matchup stats and builds. Iron is the default.")
+stats_rank = select_rank_scope()
 
 
 @st.cache_data(ttl=20)

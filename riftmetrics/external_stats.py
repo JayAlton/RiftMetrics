@@ -4,6 +4,7 @@ import math
 from datetime import date
 from pathlib import Path
 from riftmetrics.draft_scoring import norm
+from riftmetrics.rank_groups import resolve_ranks, rank_label
 
 FIELDS = ['champion', 'enemy_jungler', 'win_rate_pct', 'sample_size', 'source',
           'patch', 'rank', 'region', 'queue', 'role', 'updated_at',
@@ -41,6 +42,41 @@ def read_records(path):
             except (ValueError, TypeError, KeyError):
                 continue
     return records
+
+
+def group_rank_records(records, selection):
+    """Pool reported observations within a source, never across sites or patches.
+
+    Require every requested rank for that source/cohort. Missing ranks cannot
+    silently turn an Iron+Bronze statistic into Iron-only evidence.
+    """
+    ranks = resolve_ranks(selection)
+    if not ranks:
+        return []
+    if len(ranks) == 1:
+        return [r for r in records if (r.get('rank') or '').casefold() == ranks[0].casefold()]
+    groups = {}
+    for row in sorted(records, key=lambda r: r.get('updated_at') or ''):
+        if row.get('rank') not in ranks:
+            continue
+        key = (norm(row['champion']), norm(row['enemy_jungler']),
+               (row.get('source') or 'Manual').casefold(),
+               row.get('patch'), row.get('region'), row.get('queue'), row.get('role'))
+        groups.setdefault(key, {})[row['rank']] = row
+    pooled = []
+    for by_rank in groups.values():
+        if any(rank not in by_rank for rank in ranks):
+            continue
+        entries = [by_rank[rank] for rank in ranks]
+        total = sum(r['sample'] for r in entries)
+        rate = sum(r['rate'] * r['sample'] for r in entries) / total
+        expected = (sum(r['expected_rate'] * r['sample'] for r in entries) / total
+                    if all(r.get('expected_rate') is not None for r in entries) else None)
+        pooled.append(dict(entries[0], rank=rank_label(ranks), rate=rate,
+            win_rate_pct=rate * 100, sample=total, sample_size=total,
+            expected_rate=expected, rank_details=entries,
+            updated_at=min(r.get('updated_at') or '' for r in entries)))
+    return pooled
 
 
 def blend_records(records, context=None):

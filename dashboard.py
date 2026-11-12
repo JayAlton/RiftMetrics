@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+from riftmetrics.draft_assistant import render_live_draft
+from riftmetrics.live_stats import RANKS
 from riftmetrics.static_data import (
     QUEUE_NAMES, ROLE_NAMES, champion_image, get_version, item_image,
     readable_champion,
@@ -12,7 +14,7 @@ from riftmetrics.static_data import (
 
 DB_PATH = Path(__file__).resolve().parent / "data" / "riftmetrics.db"
 
-st.set_page_config(page_title="RiftMetrics | Match Analytics", page_icon="🎯", layout="wide")
+st.set_page_config(page_title="RiftMetrics | Match Analytics", page_icon="🎯", layout="wide", initial_sidebar_state="expanded")
 st.markdown("""
 <style>
 .block-container {padding-top: 1.5rem; max-width: 1450px;}
@@ -22,6 +24,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 st.title("🎯 RiftMetrics")
 st.caption("Your draft and ranked performance • Champion matchups • Stored locally in SQLite")
+stats_rank = st.sidebar.selectbox("External data rank", list(RANKS), key="draft_stats_rank",
+                                 help="Choose any rank for automatic matchup stats and builds. Iron is the default.")
 
 
 @st.cache_data(ttl=20)
@@ -129,7 +133,8 @@ def show_match(row, version):
 
 
 if not DB_PATH.exists():
-    st.error("No database found at data/riftmetrics.db. Run the importer first.")
+    st.info("Import matches with python main.py --games 20 to unlock performance analytics. You can still plan a draft below.")
+    render_live_draft([], get_version(), stats_rank=stats_rank)
     st.stop()
 try:
     matches = load_matches(str(DB_PATH), DB_PATH.stat().st_mtime)
@@ -137,7 +142,8 @@ except (sqlite3.Error, ValueError, json.JSONDecodeError) as exc:
     st.error(f"Unable to read database: {exc}")
     st.stop()
 if matches.empty:
-    st.info("No matches have been imported yet.")
+    st.info("No matches have been imported yet. You can still plan a draft below.")
+    render_live_draft([], get_version(), stats_rank=stats_rank)
     st.stop()
 
 version = get_version()
@@ -163,8 +169,8 @@ if filtered.empty:
     st.stop()
 
 # Keep the overview compact and the dense information in dedicated tabs.
-overview, champions_tab, matches_tab, draft_tab = st.tabs(
-    ["📊 Overview", "🏆 Champions", "🗂️ Matches", "🧩 Draft & Build"])
+overview, champions_tab, matches_tab, draft_tab, live_tab = st.tabs(
+    ["📊 Overview", "🏆 Champions", "🗂️ Matches", "🧩 Draft & Build", "⚡ Live Draft"])
 with overview:
     games = len(filtered)
     a, b, c, d = st.columns(4)
@@ -177,6 +183,28 @@ with overview:
     timeline["rolling_winrate"] = timeline["win"].rolling(10, min_periods=1).mean() * 100
     st.line_chart(timeline.set_index("played_at")["rolling_winrate"], y_label="Rolling win rate (%)")
     st.caption("Rolling last 10 matches (or fewer when your sample is small).")
+    left, right = st.columns(2)
+    with left:
+        st.subheader("Farming & economy")
+        trend = timeline.set_index("played_at")
+        metric = st.selectbox("Trend metric", ["cs_per_min", "gold_per_min", "kda"],
+                              format_func=lambda x: {"cs_per_min": "CS per minute", "gold_per_min": "Gold per minute", "kda": "KDA"}[x])
+        st.line_chart(trend[metric].rolling(10, min_periods=1).mean())
+        st.caption("Rolling average over up to 10 games.")
+    with right:
+        st.subheader("Champion results")
+        outcomes = filtered.groupby("champion")["win"].agg(["sum", "count"])
+        outcomes["Wins"] = outcomes["sum"]
+        outcomes["Losses"] = outcomes["count"] - outcomes["sum"]
+        st.bar_chart(outcomes.nlargest(10, "count")[["Wins", "Losses"]], color=["#22c55e", "#f87171"])
+    st.subheader("Enemy jungle matchups")
+    matchups = filtered[(filtered["role"] == "JUNGLE") & (filtered["enemy_jungler"] != "Unknown")].groupby("enemy_jungler").agg(
+        Games=("win", "size"), Wins=("win", "sum"), KDA=("kda", "mean"), CS_min=("cs_per_min", "mean"))
+    matchups["Win rate"] = matchups["Wins"] / matchups["Games"] * 100
+    st.dataframe(matchups.sort_values("Games", ascending=False).round(2),
+                 column_config={"Win rate": st.column_config.ProgressColumn("Win rate %", min_value=0, max_value=100, format="%.1f%%")},
+                 use_container_width=True)
+    st.caption("Personal jungle games in the selected filters. Small samples can be misleading.")
 
 with champions_tab:
     summary = filtered.groupby("champion", as_index=False).agg(
@@ -216,4 +244,8 @@ with draft_tab:
     selected_match_id = st.selectbox("Inspect a match", list(labels), format_func=lambda x: labels[x])
     row = filtered.loc[filtered["match_id"] == selected_match_id].iloc[0]
     show_match(row, version)
-    st.caption("Draft view shows historical picks. Automated live draft recommendations are a future milestone.")
+    st.caption("Draft view shows historical picks. Use the Live Draft tab to compare picks with manually entered draft information.")
+
+
+with live_tab:
+    render_live_draft(matches, version, stats_rank=stats_rank)

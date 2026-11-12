@@ -1,0 +1,4 @@
+champion,enemy_jungler,win_rate_pct,sample_size,source,patch,rank,region,queue,role,updated_at,expected_win_rate_pct,source_url
+Briar,Lillia,51.8,1399,Mobalytics,16.22,Emerald+,All regions,420,JUNGLE,2026-11-12,52.2,https://mobalytics.gg/lol/champions/briar/counters/jungle/vs-lillia
+Darius,Lillia,49.0,541,Mobalytics,16.21,Emerald+,All regions,420,JUNGLE,2026-11-12,51.4,https://mobalytics.gg/lol/champions/darius/counters/jungle/vs-lillia
+Briar,Lillia,50.96,314,Lolalytics,16.15,Emerald+,All regions,420,JUNGLE,2026-11-12,,https://lolalytics.com/lol/briar/vs/lillia/build/?lane=jungle

@@ -1,46 +1,24 @@
 """Transparent, sample-size-aware RiftMetrics jungle draft recommendations."""
-import csv
-from pathlib import Path
 
-DEFAULT_POOL = ["Warwick", "Kayn", "Wukong", "Xin Zhao", "Lillia", "Master Yi", "Jax", "Ekko", "Diana", "Rammus"]
+DEFAULT_POOL = ["Briar", "Darius", "Warwick", "Kayn", "Wukong", "Xin Zhao", "Lillia", "Master Yi", "Jax", "Ekko", "Diana", "Rammus"]
 
 
 def norm(value):
     return str(value or "").strip().casefold().replace("'", "").replace(" ", "")
 
 
-def load_external_priors(path):
-    """Return {(champion, enemy_jungler): prior} from a user-supplied CSV; ignore bad rows."""
-    result = {}
-    path = Path(path)
-    if not path.is_file():
-        return result
-    with path.open(newline="", encoding="utf-8-sig") as handle:
-        for row in csv.DictReader(handle):
-            try:
-                champion, enemy = norm(row.get("champion")), norm(row.get("enemy_jungler"))
-                pct = float(row["win_rate_pct"])
-                sample = int(row["sample_size"])
-                if not champion or not enemy or not 0 <= pct <= 100 or sample < 1:
-                    continue
-                result[(champion, enemy)] = {
-                    "rate": pct / 100, "sample": sample,
-                    "source": (row.get("source") or "Manual").strip(),
-                    "patch": (row.get("patch") or "").strip(),
-                    "updated_at": (row.get("updated_at") or "").strip(),
-                }
-            except (ValueError, TypeError, KeyError):
-                continue
-    return result
+def load_external_priors(path, context=None):
+    """Blend comparable source snapshots; never combine patches or ranked cohorts."""
+    from riftmetrics.external_stats import read_records, blend_records
+    return blend_records(read_records(path), context)
 
 
-def score_pool(rows, pool, enemy_jungler=None, priors=None, queue_id=400):
-    """Score historical JUNGLE performance only; does not imply global win rate.
+def score_pool(rows, pool, enemy_jungler=None, priors=None, queue_id=400, external_weight=.90, matchup_weight=.95, personal_max_weight=.15):
+    """Blend external matchup evidence, limited personal history and neutral uncertainty.
 
-    Personal champion win rate is smoothed toward 50% with 10 pseudo-games.
-    Matchup is smoothed toward that champion's baseline with 8 pseudo-games.
-    External prior can contribute up to 30% of the matchup component, only
-    when explicitly supplied, and is not treated as a Riot API statistic.
+    Personal history has a sample-scaled budget: at the default 15% maximum,
+    fewer than 10 games contributes under 5%, 10 games contributes 5%, and
+    30+ games contributes at most 15%. Missing evidence stays neutral.
     """
     priors = priors or {}
     enemy_key = norm(enemy_jungler)
@@ -60,20 +38,30 @@ def score_pool(rows, pool, enemy_jungler=None, priors=None, queue_id=400):
         matchups = [r for r in games if enemy_key and norm(r.get("enemy_jungler")) == enemy_key]
         mn = len(matchups)
         mw = sum(bool(r.get("win")) for r in matchups)
-        estimated = (mw + 8 * baseline) / (mn + 8)
+        personal_matchup = (mw + 8 * baseline) / (mn + 8)
+        weight = 0.0
         prior = priors.get((norm(champ), enemy_key)) if enemy_key else None
         if prior:
-            # External percentages are contextual third-party data; never overwhelm personal sample.
-            weight = min(.30, .30 * (8 / (8 + mn)))
-            estimated = (1 - weight) * estimated + weight * prior["rate"]
-        # A weak uncertainty penalty favors champions with enough games to assess.
-        confidence = min(1.0, n / 20)
-        score = .65 * estimated + .35 * baseline - .02 * (1 - confidence)
+            weight = max(0.0, min(.90, external_weight)) * min(1.0, prior["sample"] / 1000)
+        matchup_share = max(0.0, min(1.0, matchup_weight)) if enemy_key else 0.0
+        external_share = matchup_share * weight
+        # Limit all personal-WR paths, including head-to-head history, to one budget.
+        sample_factor = (min(n, 10) / 10) ** 2 / 3 + 2 * min(max(n - 10, 0) / 20, 1) / 3
+        personal_share = min(1 - external_share, max(0.0, min(.30, personal_max_weight)) * sample_factor)
+        personal_signal = matchup_share * personal_matchup + (1 - matchup_share) * baseline
+        estimated = .5 + weight * (prior["rate"] - .5) if prior else .5
+        score_without_external = .5 + personal_share * (personal_signal - .5)
+        score = score_without_external + external_share * (prior["rate"] - .5) if prior else score_without_external
+        confidence = min(1.0, n / 30)
         scores.append({
             "champion": champ, "games": n, "wins": wins,
             "personal_wr": personal_rate, "matchup_games": mn,
             "matchup_wins": mw, "matchup_wr": mw / mn if mn else None,
-            "external": prior, "estimated_rate": estimated,
+            "external": prior, "external_weight": weight, "estimated_rate": estimated,
             "score": score, "confidence": confidence,
+            "external_score_change": score - score_without_external,
+            "overall_external_weight": external_share,
+            "personal_weight": personal_share,
+            "neutral_weight": 1 - external_share - personal_share,
         })
     return sorted(scores, key=lambda s: (s["score"], s["games"]), reverse=True)

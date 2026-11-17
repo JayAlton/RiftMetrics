@@ -17,6 +17,18 @@ Search a champion Win rate Games Lee Sin 52.0% 200 Lillia 48.5% 1,234 Ekko 51.0%
 
 
 class LiveStatsTests(unittest.TestCase):
+    def test_off_meta_opponents_request_the_same_lane_explicitly(self):
+        for enemy in ['Fizz', 'Mordekaiser']:
+            url = page('Lolalytics', 'Briar', enemy, role='JUNGLE')
+            self.assertIn('lane=jungle&vslane=jungle', url)
+            html = LOL.replace('Lillia', enemy)
+            row, _ = parse_lolalytics(html, 'Briar', enemy, url)
+            self.assertEqual(row['enemy_jungler'], enemy)
+            with self.assertRaises(ValueError):
+                parse_lolalytics(html.replace(f'{enemy} jungle', f'{enemy} middle'), 'Briar', enemy, url)
+        for role, lane in [('TOP', 'top'), ('MIDDLE', 'middle'), ('BOTTOM', 'bottom'), ('UTILITY', 'support')]:
+            self.assertIn(f'lane={lane}&vslane={lane}', page('Lolalytics', 'Lux', 'Fizz', role=role))
+
     def test_full_build_slot_boundaries_stats_and_selected_runes(self):
         def item(ident, name):
             return f'<img src="https://cdn5.lolalytics.com/item64/{ident}.webp" alt="{name}">51.5% 42'

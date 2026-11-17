@@ -4,6 +4,44 @@ import streamlit as st
 from riftmetrics.static_data import item_image
 
 
+def render_opgg_items(champion, role, rank, version):
+    from riftmetrics.opgg_items import fetch_items
+
+    st.markdown('#### OP.GG item explorer')
+    refresh = st.button('Refresh OP.GG items', key='draft_opgg_refresh')
+    with st.spinner('Loading OP.GG item statistics…'):
+        result = fetch_items(champion, role, rank, force=refresh)
+    if result['error']:
+        st.warning(f"OP.GG item retrieval: {result['error']}")
+    data = result['data']
+    if not data:
+        st.info('No validated OP.GG item data available. Try refreshing later.')
+        return
+    if result['stale']:
+        st.warning('Showing older cached OP.GG item data.')
+    st.caption(f"{champion} · {role} · {rank} · All regions · Patch {data['patch']} · Retrieved {result['checked_at']}")
+    st.markdown(f"[Open OP.GG item source]({result['source_url']})")
+    st.caption('Champion-and-role totals across opponents. These are not enemy-specific matchup builds or purchase-position statistics. Core-build WR belongs to the entire combination.')
+    left, right = st.columns(2)
+    with left:
+        minimum = st.number_input('Minimum item games', min_value=1, value=100, step=25, key='draft_opgg_min_games')
+    with right:
+        order = st.selectbox('Sort OP.GG items', ['Pick rate', 'Win rate', 'Games'], key='draft_opgg_sort')
+    sort_key = {'Pick rate': 'pick_rate_pct', 'Win rate': 'win_rate_pct', 'Games': 'games'}[order]
+    for section in ('Core builds', 'Boots', 'Starter items', 'Items'):
+        with st.expander(section, expanded=section == 'Items'):
+            rows = sorted((r for r in data['rows'] if r['section'] == section and r['games'] >= minimum), key=lambda r: r[sort_key], reverse=True)
+            if not rows:
+                st.caption('No rows meet the minimum game count.')
+                continue
+            st.dataframe([{
+                'Icon': item_image(r['items'][0]['id'], version),
+                'Item / combination': ' → '.join(i['name'] or str(i['id']) for i in r['items']),
+                'Win rate %': r['win_rate_pct'], 'Pick rate %': r['pick_rate_pct'], 'Games': r['games'],
+            } for r in rows], hide_index=True, column_config={'Icon': st.column_config.ImageColumn('')})
+    st.caption('Item win rates reflect the games in which an item was acquired. Game length and being ahead affect those rates; the highest WR alone does not identify the best purchase.')
+
+
 def show_item(item, version):
     st.image(item_image(item['id'], version), width=40)
     st.markdown(f"**{item['name']}**")

@@ -4,7 +4,7 @@ DEFAULT_POOL = ["Warwick", "Kayn", "Wukong", "Xin Zhao", "Lillia", "Master Yi", 
 
 
 def norm(value):
-    return str(value or "").strip().casefold().replace("'", "").replace(" ", "")
+    return str(value or "").strip().casefold().replace("’", "").replace("'", "").replace(" ", "")
 
 
 def load_external_priors(path, context=None):

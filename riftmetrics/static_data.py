@@ -73,6 +73,8 @@ def item_image(item_id, version=None):
 
 
 def readable_champion(name):
+    if str(name).casefold().replace("’", "").replace("'", "") == "belveth":
+        return "Bel'Veth"
     names = {"MonkeyKing": "Wukong", "Chogath": "Cho'Gath", "Khazix": "Kha'Zix",
              "Leblanc": "LeBlanc", "MissFortune": "Miss Fortune", "Kaisa": "Kai'Sa"}
     return names.get(name, name or "Unknown")

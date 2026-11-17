@@ -22,7 +22,8 @@ def render_external_stats(path, catalog, enemy_jungler, pool, rank=None, role="J
     if not ranks:
         st.info('Select at least one rank to retrieve matchup statistics.')
         return {}, []
-    st.caption(f'Matchup win rates: {rank_label(rank)} · Ranked Solo/Duo · All regions')
+    st.caption(f'Matchup win rates: {ROLES[role][0]} vs {ROLES[role][0]} · {rank_label(rank)} · Ranked Solo/Duo · All regions')
+    st.caption('All champion picks use your selected role, including off-meta picks. Missing role data stays unavailable; another lane is never substituted.')
     auto = st.toggle('Automatically fetch matchup stats', value=True, key=namespace + "auto_sources")
     fetched = []
     sources = st.multiselect('Automatic sources', SOURCES, default=list(SOURCES), key=namespace + "source_selection")
@@ -45,6 +46,8 @@ def render_external_stats(path, catalog, enemy_jungler, pool, rank=None, role="J
                     st.write(problem)
         if not valid:
             st.warning('Automatic sources are unavailable. Saved snapshots can still be used below; missing data is not a favorable matchup.')
+        elif any(r['record']['sample_size'] < 300 for r in valid):
+            st.caption('Some matchups have fewer than 300 games in the selected rank and role. Off-meta picks often have limited samples; their influence is reduced automatically. A broader rank selection can provide more evidence.')
     records = []
     for result in fetched:
         if result.get('record'):
@@ -93,7 +96,7 @@ def render_evidence(path, catalog, enemy_jungler, pool, live_records, rank='Iron
                         st.success('Saved. This snapshot is available below.')
                     except OSError as exc:
                         st.error(f'Unable to save snapshot: {exc}')
-    records = read_records(SNAPSHOTS, role=role) + read_records(path, role=role) + live_records
+    records = read_records(SNAPSHOTS, role=role) + read_records(path, role=role) + [r for r in live_records if r.get('role') == role]
     records = group_rank_records(records, rank)
     if len(ranks) > 1:
         st.caption('Rank rates are weighted by reported games within each source. All selected ranks must be available on the same patch for a source to contribute. Counts across websites are not added together.')

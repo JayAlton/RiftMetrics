@@ -8,8 +8,9 @@ import streamlit.components.v1 as components
 
 from riftmetrics.draft_scoring import score_pool, norm
 from riftmetrics.external_stats_ui import render_external_stats
-from riftmetrics.build_ui import render_build_details
+from riftmetrics.build_ui import render_build_details, render_opgg_items
 from riftmetrics.rank_groups import resolve_ranks
+from riftmetrics.ban_assistant import render_ban_assistant
 from riftmetrics.roles import ROLES
 from riftmetrics.static_data import champion_image, readable_champion, champion_catalog
 
@@ -22,8 +23,13 @@ def render_theme_preview(matches, version, stats_rank="Iron", settings_container
         role = st.selectbox("Your role", list(ROLES), index=1,
                             format_func=lambda r: ROLES[r][0], key="theme_lab_role")
     label, _, default_pool = ROLES[role]
+    st.caption(f"Import scope: {label} for your champion and the opponent. Champion defaults never override this role.")
     catalog = sorted(set(champion_catalog(version).values()) | set(default_pool), key=str.casefold)
     pool = st.multiselect("Your champion pool", catalog, default=default_pool, key=f"lab_pool_{role}")
+    if pool:
+        rows = matches.to_dict("records") if hasattr(matches, "to_dict") else list(matches)
+        with st.expander("Ban recommendations", expanded=True):
+            render_ban_assistant(rows, pool, role, stats_rank, version)
     enemy_pick = st.selectbox(f"Enemy {label.lower()}", ["Unknown"] + catalog, key=f"lab_enemy_{role}")
     enemy = None if enemy_pick == "Unknown" else enemy_pick
     pool = [c for c in pool if not enemy or norm(c) != norm(enemy)]
@@ -36,6 +42,7 @@ def render_theme_preview(matches, version, stats_rank="Iron", settings_container
     settings_area = settings_container if settings_container is not None else st.expander("Weights and Settings", expanded=False)
     with settings_area:
         st.subheader("Weights and Settings")
+        opgg_enabled = st.toggle("Import OP.GG item statistics", value=True, key="draft_opgg_enabled")
         st.caption(f"Applies to Draft Room · {label} · vs {enemy or 'Unknown'}. Choose your role, pool, and opponent in the Draft tab.")
         external_weight = st.slider("Maximum external matchup influence (%)", 0, 90, 90, 5, key="lab_external_weight")
         matchup_weight = st.slider("Head-to-head share of ranking (%)", 0, 100, 95, 5, key="lab_matchup_weight")
@@ -132,6 +139,8 @@ def render_theme_preview(matches, version, stats_rank="Iron", settings_container
             st.warning("Build is from an older cached response. Refresh matchup data when online.")
     else:
         st.info("Select an enemy and enable Lolalytics in Matchup sources to load items and runes when available.")
+    if opgg_enabled and build_rank:
+        render_opgg_items(pick, role, build_rank, version)
     with st.expander("Full champion comparison"):
         st.dataframe([{
             'Champion': r['champion'], 'Score': round(r['score'] * 100, 1),

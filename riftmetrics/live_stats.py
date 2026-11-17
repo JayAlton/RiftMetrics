@@ -10,7 +10,7 @@ import time
 import requests
 from riftmetrics.draft_scoring import norm
 from riftmetrics.rank_groups import resolve_ranks
-from riftmetrics.roles import ROLES
+from riftmetrics.roles import ROLES, source_lane
 
 CACHE = Path(__file__).resolve().parents[1] / 'data' / 'source_cache'
 TTL = 6 * 3600
@@ -56,12 +56,12 @@ def text(html):
 
 
 def page(source, champion, enemy, rank='Iron', role='JUNGLE'):
-    lane = ROLES[role][1]
+    lane = source_lane(role, source)
     c, e = slug(champion), slug(enemy)
     tier = RANKS[rank]
     if source == 'OP.GG':
-        return f'https://op.gg/lol/champions/{c}/counters/{dict(MIDDLE="mid", BOTTOM="adc").get(role, lane)}?region=global&tier={tier}'
-    return f'https://lolalytics.com/lol/{c}/vs/{e}/build/?lane={lane}&tier={tier}'
+        return f'https://op.gg/lol/champions/{c}/counters/{lane}?region=global&tier={tier}'
+    return f'https://lolalytics.com/lol/{c}/vs/{e}/build/?lane={lane}&vslane={lane}&tier={tier}'
 
 
 def record(champion, enemy, rate, games, patch, source, url, rank='Iron', role='JUNGLE'):
@@ -94,7 +94,7 @@ def parse_opgg(html, champion, enemy, url, rank='Iron', role='JUNGLE'):
     for name, rate, games in re.findall(r"([A-Za-z'’&. ]+?)\s+(\d+(?:\.\d+)?)%\s+([\d,]+)", table[1]):
         if slug(name.strip()) == slug(enemy):
             return record(champion, enemy, float(rate), int(games.replace(',', '')), heading[2], 'OP.GG', url, rank, role), []
-    raise ValueError('Enemy matchup absent from counter table')
+    raise ValueError('No matchup listed for this opponent in the requested role/rank. Off-meta picks may be omitted; try Lolalytics or a broader rank selection.')
 
 
 class Images(HTMLParser):

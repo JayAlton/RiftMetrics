@@ -8,6 +8,7 @@ from riftmetrics.build_ui import render_build_details
 from riftmetrics.external_stats_ui import render_external_stats
 from riftmetrics.draft_scoring import DEFAULT_POOL, score_pool, norm
 from riftmetrics.static_data import champion_catalog, champion_image, readable_champion
+from riftmetrics.theme import render_champion_reveal
 
 PRIOR_PATH = Path(__file__).resolve().parents[1] / "data" / "matchup_priors.csv"
 
@@ -47,18 +48,11 @@ def render_live_draft(matches, version, stats_rank=None):
     if not results:
         return
     winner = results[0]
-    pic, why = st.columns([1, 6])
-    with pic:
-        st.image(champion_image(winner["champion"], version), width=80)
-    with why:
-        st.markdown(f"### Recommended: {readable_champion(winner['champion'])}")
-        st.write(f"**{winner['games']}** personal {label.lower()} games · "
-                 f"**{winner['matchup_games']}** vs selected opponent · "
-                 f"**{winner['score']*100:.1f}** relative ranking score")
-        if enemy_jg and not winner["external"]:
-            st.warning("This top-ranked pick has no external matchup evidence in the selected cohort. A neutral score does not mean a favorable matchup.")
-        if winner["games"] < 10:
-            st.warning("Limited personal sample — recommendation is uncertain.")
+    render_champion_reveal(winner, version, label, enemy_jg)
+    if enemy_jg and not winner["external"]:
+        st.warning("This top-ranked pick has no external matchup evidence in the selected cohort. A neutral score does not mean a favorable matchup.")
+    if winner["games"] < 10:
+        st.warning("Limited personal sample — recommendation is uncertain.")
     table = []
     for rank, r in enumerate(results, 1):
         external = r["external"]

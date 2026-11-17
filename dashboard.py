@@ -10,6 +10,7 @@ from riftmetrics.rank_ui import select_rank_scope
 from riftmetrics.api import RiotAPIError
 from riftmetrics.sync import sync_recent_games
 from riftmetrics.theme_preview import render_theme_preview
+from riftmetrics.theme import apply_theme
 from riftmetrics.static_data import (
     QUEUE_NAMES, ROLE_NAMES, champion_image, get_version, item_image,
     readable_champion,
@@ -18,13 +19,7 @@ from riftmetrics.static_data import (
 DB_PATH = Path(__file__).resolve().parent / "data" / "riftmetrics.db"
 
 st.set_page_config(page_title="RiftMetrics | Match Analytics", page_icon="🎯", layout="wide", initial_sidebar_state="expanded")
-st.markdown("""
-<style>
-.block-container {padding-top: 1.5rem; max-width: 1450px;}
-[data-testid="stMetric"] {background: rgba(120,130,150,.09); border: 1px solid rgba(120,130,150,.15); padding: 14px; border-radius: 12px;}
-[data-testid="stMetricLabel"] {font-weight: 600;}
-</style>
-""", unsafe_allow_html=True)
+apply_theme()
 st.title("🎯 RiftMetrics")
 st.caption("Your draft and ranked performance • Champion matchups • Stored locally in SQLite")
 stats_rank = select_rank_scope()
@@ -157,7 +152,7 @@ if not DB_PATH.exists():
     with live_empty:
         render_live_draft([], get_version(), stats_rank=stats_rank)
     with theme_empty:
-        render_theme_preview([], get_version())
+        render_theme_preview([], get_version(), stats_rank=stats_rank)
     st.stop()
 try:
     matches = load_matches(str(DB_PATH), DB_PATH.stat().st_mtime)
@@ -170,7 +165,7 @@ if matches.empty:
     with live_empty:
         render_live_draft([], get_version(), stats_rank=stats_rank)
     with theme_empty:
-        render_theme_preview([], get_version())
+        render_theme_preview([], get_version(), stats_rank=stats_rank)
     st.stop()
 
 version = get_version()
@@ -278,4 +273,4 @@ with live_tab:
     render_live_draft(matches, version, stats_rank=stats_rank)
 
 with theme_tab:
-    render_theme_preview(matches, version)
+    render_theme_preview(matches, version, stats_rank=stats_rank)

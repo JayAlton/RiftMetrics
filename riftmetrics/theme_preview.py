@@ -14,12 +14,12 @@ from riftmetrics.roles import ROLES
 from riftmetrics.static_data import champion_image, readable_champion, champion_catalog
 
 
-def render_theme_preview(matches, version, stats_rank="Iron"):
-    st.subheader("Theme Lab · The champion reveal")
+def render_theme_preview(matches, version, stats_rank="Iron", settings_container=None):
+    st.subheader("Draft Room")
     st.caption("Draft Room combines your role history with same-role matchup evidence. Select an opponent to retrieve matchup stats, items, and runes.")
     left, right = st.columns(2)
     with left:
-        role = st.selectbox("Preview role", list(ROLES), index=1,
+        role = st.selectbox("Your role", list(ROLES), index=1,
                             format_func=lambda r: ROLES[r][0], key="theme_lab_role")
     label, _, default_pool = ROLES[role]
     catalog = sorted(set(champion_catalog(version).values()) | set(default_pool), key=str.casefold)
@@ -28,12 +28,19 @@ def render_theme_preview(matches, version, stats_rank="Iron"):
     enemy = None if enemy_pick == "Unknown" else enemy_pick
     pool = [c for c in pool if not enemy or norm(c) != norm(enemy)]
     if not pool:
+        if settings_container is not None:
+            with settings_container:
+                st.info("Choose a champion pool in Draft to configure its matchup sources and weights.")
         st.info("Choose at least one champion other than the enemy pick.")
         return
-    with st.expander("Matchup sources and ranking settings", expanded=False):
+    settings_area = settings_container if settings_container is not None else st.expander("Weights and Settings", expanded=False)
+    with settings_area:
+        st.subheader("Weights and Settings")
+        st.caption(f"Applies to Draft Room · {label} · vs {enemy or 'Unknown'}. Choose your role, pool, and opponent in the Draft tab.")
         external_weight = st.slider("Maximum external matchup influence (%)", 0, 90, 90, 5, key="lab_external_weight")
         matchup_weight = st.slider("Head-to-head share of ranking (%)", 0, 100, 95, 5, key="lab_matchup_weight")
         personal_weight = st.slider("Maximum personal history influence (%)", 0, 30, 15, 1, key="lab_personal_weight")
+        st.caption("External influence scales down below 1,000 source games. Personal influence scales with your role history; missing evidence stays neutral. Scores are relative rankings, not win probabilities.")
         priors, fetched = render_external_stats(
             Path(__file__).resolve().parents[1] / "data" / "matchup_priors.csv",
             catalog, enemy, pool, rank=stats_rank, role=role, namespace="lab_")

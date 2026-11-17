@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pandas as pd
 import streamlit as st
-from riftmetrics.draft_assistant import render_live_draft
 from riftmetrics.rank_ui import select_rank_scope
 from riftmetrics.api import RiotAPIError
 from riftmetrics.sync import sync_recent_games
@@ -148,11 +147,9 @@ with st.sidebar:
 
 if not DB_PATH.exists():
     st.info("Use Update ranked + draft games in the sidebar to import your match history. You can still plan a draft below.")
-    live_empty, theme_empty = st.tabs(["Live Draft", "Theme Lab"])
-    with live_empty:
-        render_live_draft([], get_version(), stats_rank=stats_rank)
+    theme_empty, settings_empty = st.tabs(["Draft", "Weights and Settings"])
     with theme_empty:
-        render_theme_preview([], get_version(), stats_rank=stats_rank)
+        render_theme_preview([], get_version(), stats_rank=stats_rank, settings_container=settings_empty)
     st.stop()
 try:
     matches = load_matches(str(DB_PATH), DB_PATH.stat().st_mtime)
@@ -161,11 +158,9 @@ except (sqlite3.Error, ValueError, json.JSONDecodeError) as exc:
     st.stop()
 if matches.empty:
     st.info("No matches have been imported yet. You can still plan a draft below.")
-    live_empty, theme_empty = st.tabs(["Live Draft", "Theme Lab"])
-    with live_empty:
-        render_live_draft([], get_version(), stats_rank=stats_rank)
+    theme_empty, settings_empty = st.tabs(["Draft", "Weights and Settings"])
     with theme_empty:
-        render_theme_preview([], get_version(), stats_rank=stats_rank)
+        render_theme_preview([], get_version(), stats_rank=stats_rank, settings_container=settings_empty)
     st.stop()
 
 version = get_version()
@@ -191,8 +186,8 @@ if filtered.empty:
     st.stop()
 
 # Keep the overview compact and the dense information in dedicated tabs.
-overview, champions_tab, matches_tab, draft_tab, live_tab, theme_tab = st.tabs(
-    ["📊 Overview", "🏆 Champions", "🗂️ Matches", "🧩 Draft & Build", "⚡ Live Draft", "🎨 Theme Lab"])
+overview, champions_tab, matches_tab, draft_tab, theme_tab, settings_tab = st.tabs(
+    ["📊 Overview", "🏆 Champions", "🗂️ Matches", "🧩 Draft & Build", "⚡ Draft", "⚙️ Weights and Settings"])
 with overview:
     games = len(filtered)
     a, b, c, d = st.columns(4)
@@ -266,11 +261,8 @@ with draft_tab:
     selected_match_id = st.selectbox("Inspect a match", list(labels), format_func=lambda x: labels[x])
     row = filtered.loc[filtered["match_id"] == selected_match_id].iloc[0]
     show_match(row, version)
-    st.caption("Draft view shows historical picks. Use the Live Draft tab to compare picks with manually entered draft information.")
+    st.caption("Draft view shows historical picks. Use the Draft tab to compare picks with manually entered draft information.")
 
-
-with live_tab:
-    render_live_draft(matches, version, stats_rank=stats_rank)
 
 with theme_tab:
-    render_theme_preview(matches, version, stats_rank=stats_rank)
+    render_theme_preview(matches, version, stats_rank=stats_rank, settings_container=settings_tab)

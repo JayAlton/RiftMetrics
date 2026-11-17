@@ -3,6 +3,7 @@ from pathlib import Path
 import streamlit as st
 import pandas as pd
 from riftmetrics.rank_groups import resolve_ranks
+from riftmetrics.roles import ROLES
 from riftmetrics.build_ui import render_build_details
 from riftmetrics.external_stats_ui import render_external_stats
 from riftmetrics.draft_scoring import DEFAULT_POOL, score_pool, norm
@@ -12,34 +13,37 @@ PRIOR_PATH = Path(__file__).resolve().parents[1] / "data" / "matchup_priors.csv"
 
 
 def render_live_draft(matches, version, stats_rank=None):
-    st.subheader("Live Draft · Jungle Pick Assistant")
-    st.caption("Select the enemy jungler to compare your jungle pool. Recommendations use jungle-versus-jungle matchup data.")
-    catalog = sorted(set(champion_catalog(version).values()) | set(DEFAULT_POOL), key=str.casefold)
+    role = st.radio("Live Draft role", list(ROLES), index=1,
+                    format_func=lambda r: ROLES[r][0], horizontal=True, key="live_draft_role")
+    label, lane, default_pool = ROLES[role]
+    st.subheader(f"Live Draft | {label} Pick Assistant")
+    st.caption(f"Select the enemy {label.lower()} to compare your champion pool using same-role matchup data.")
+    catalog = sorted(set(champion_catalog(version).values()) | set(default_pool), key=str.casefold)
     if not catalog:
-        catalog = sorted(set(DEFAULT_POOL))
+        catalog = sorted(set(default_pool))
     options = ["Unknown"] + catalog
-    pool = st.multiselect("Your jungle champion pool", catalog,
-                          default=[c for c in DEFAULT_POOL if c in catalog],
-                          key="live_draft_pool")
+    pool = st.multiselect(f"Your {label.lower()} champion pool", catalog,
+                          default=[c for c in default_pool if c in catalog],
+                          key=f"live_draft_pool_{role}")
     if not pool:
-        st.info("Select at least one jungle champion to compare.")
+        st.info("Select at least one champion to compare.")
         return
-    enemy_pick = st.selectbox("Enemy jungler", options, key="draft_enemy_JUNGLE")
+    enemy_pick = st.selectbox(f"Enemy {label.lower()}", options, key=f"draft_enemy_{role}")
     enemy_jg = enemy_pick if enemy_pick != "Unknown" else None
     pool = [c for c in pool if not enemy_jg or norm(c) != norm(enemy_jg)]
     if not pool:
         st.info("Your only pool champion is the enemy pick. Add another champion to compare.")
         return
     st.markdown("#### Champion recommendations")
-    st.caption("Uses your combined Normal Draft + Ranked Solo/Duo JUNGLE history, plus automatically fetched matchup statistics and saved fallbacks. This is an experimental ranking, not a guaranteed win probability.")
+    st.caption(f"Uses your combined Normal Draft + Ranked Solo/Duo {label} history, plus automatically fetched matchup statistics and saved fallbacks. This is an experimental ranking, not a guaranteed win probability.")
     external_weight = st.slider("Maximum external matchup influence (%)", 0, 90, 90, 5)
     st.caption("External influence is reduced for samples below 1,000 games. It applies to the matchup component.")
     matchup_weight = st.slider("Head-to-head share of ranking (%)", 0, 100, 95, 5)
     personal_max = st.slider("Maximum personal history influence (%)", 0, 30, 15, 1)
     st.caption("At the default: fewer than 10 personal games gets under 5% influence, 10 games gets 5%, and 30+ games gets up to 15%. Missing evidence stays neutral; your WR never takes over when outside data is missing.")
-    priors, fetched = render_external_stats(PRIOR_PATH, catalog, enemy_jg, pool, rank=stats_rank)
+    priors, fetched = render_external_stats(PRIOR_PATH, catalog, enemy_jg, pool, rank=stats_rank, role=role)
     rows = matches.to_dict("records") if hasattr(matches, "to_dict") else list(matches)
-    results = score_pool(rows, pool, enemy_jg, priors, external_weight=external_weight / 100, matchup_weight=matchup_weight / 100, personal_max_weight=personal_max / 100)
+    results = score_pool(rows, pool, enemy_jg, priors, external_weight=external_weight / 100, matchup_weight=matchup_weight / 100, personal_max_weight=personal_max / 100, role=role)
     if not results:
         return
     winner = results[0]
@@ -48,8 +52,8 @@ def render_live_draft(matches, version, stats_rank=None):
         st.image(champion_image(winner["champion"], version), width=80)
     with why:
         st.markdown(f"### Recommended: {readable_champion(winner['champion'])}")
-        st.write(f"**{winner['games']}** personal jungle games · "
-                 f"**{winner['matchup_games']}** vs selected jungler · "
+        st.write(f"**{winner['games']}** personal {label.lower()} games · "
+                 f"**{winner['matchup_games']}** vs selected opponent · "
                  f"**{winner['score']*100:.1f}** relative ranking score")
         if enemy_jg and not winner["external"]:
             st.warning("This top-ranked pick has no external matchup evidence in the selected cohort. A neutral score does not mean a favorable matchup.")
@@ -60,9 +64,9 @@ def render_live_draft(matches, version, stats_rank=None):
         external = r["external"]
         table.append({
             "Rank": rank, "Icon": champion_image(r["champion"], version),
-            "Champion": readable_champion(r["champion"]), "Jungle games": r["games"],
+            "Champion": readable_champion(r["champion"]), f"{label} games": r["games"],
             "Personal WR": f"{r['personal_wr']:.1%}" if r["personal_wr"] is not None else "No games",
-            "Vs enemy JG": f"{r['matchup_wins']}/{r['matchup_games']}" if enemy_jg else "Unknown",
+            "Vs opponent": f"{r['matchup_wins']}/{r['matchup_games']}" if enemy_jg else "Unknown",
             "External WR": f"{external['rate']:.1%}" if external else "—",
             "Sources": external["source"] if external else "—",
             "Largest source sample": external["sample"] if external else 0,
@@ -79,7 +83,7 @@ def render_live_draft(matches, version, stats_rank=None):
                  hide_index=True, use_container_width=True)
     st.bar_chart(pd.DataFrame({"Champion": [r["champion"] for r in results], "Score": [r["score"] * 100 for r in results]}).set_index("Champion"), horizontal=True)
     st.caption("External evidence is restricted to the selected cohort. Patch and date are displayed for review; snapshots require updates. Each source is capped at 1,000 games for blending; overlapping samples are not added together.")
-    st.caption("Relative scores use smoothed personal win rate and head-to-head results. External percentages come from automatic sources or saved fallback snapshots. Only the jungle matchup is evaluated; team composition is outside this view.")
+    st.caption("Relative scores use smoothed personal win rate and head-to-head results. External percentages come from automatic sources or saved fallback snapshots. Only the selected role matchup is evaluated; team composition is outside this view.")
 
     st.markdown("#### Build for your pick")
     pick = st.selectbox("Champion to build", [r["champion"] for r in results])
@@ -97,4 +101,4 @@ def render_live_draft(matches, version, stats_rank=None):
     elif enemy_jg:
         st.info("Build data unavailable for this pick. Enable Lolalytics in Automatic sources to retrieve its matchup items and runes.")
     else:
-        st.caption("Select an enemy jungler to load a matchup build.")
+        st.caption("Select an enemy opponent to load a matchup build.")

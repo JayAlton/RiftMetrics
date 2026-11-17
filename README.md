@@ -17,6 +17,8 @@ The script creates `data/riftmetrics.db` (SQLite) and `data/champion_stats.csv`,
 
 ## Key handling
 
+Start the dashboard with `python -m streamlit run dashboard.py`. In the sidebar, click **Update ranked + draft games** to import your latest Ranked Solo/Duo and Normal Draft games using your local `.env` settings. The default checks 20 games per mode; existing matches are skipped, match details and champion CSVs are refreshed, and the dashboard displays the updated history immediately.
+
 Never commit `.env`, API tokens, or your local `data/` directory. These paths are gitignored. Development keys expire periodically and may need renewal.
 
 ## Data sources
@@ -35,3 +37,7 @@ Queue `420` = Ranked Solo/Duo. Does not work for Wild Rift. Conservative request
 - Unit tests and configurable multi-user support
 
 RiftMetrics is not endorsed by Riot Games and is not affiliated with Riot Games.
+
+## Live Draft roles
+
+Open Live Draft and choose Top, Jungle, Mid, ADC, or Support. Each role has a starter champion pool you can customize, same-role personal history, opponent matchup evidence, and role-specific build and rune lookups. ADC and Support compare the opposing player in the same role; duo synergy and full team composition are not scored.

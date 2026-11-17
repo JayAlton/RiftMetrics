@@ -1,4 +1,4 @@
-"""RiftMetrics visual, read-only dashboard. Run: python -m streamlit run dashboard.py"""
+"""RiftMetrics dashboard. Run: python -m streamlit run dashboard.py"""
 import json
 import sqlite3
 from pathlib import Path
@@ -7,6 +7,9 @@ import pandas as pd
 import streamlit as st
 from riftmetrics.draft_assistant import render_live_draft
 from riftmetrics.rank_ui import select_rank_scope
+from riftmetrics.api import RiotAPIError
+from riftmetrics.sync import sync_recent_games
+from riftmetrics.theme_preview import render_theme_preview
 from riftmetrics.static_data import (
     QUEUE_NAMES, ROLE_NAMES, champion_image, get_version, item_image,
     readable_champion,
@@ -131,9 +134,30 @@ def show_match(row, version):
                  ("runes", "summoner_spell_ids", "personal_objectives")})
 
 
+with st.sidebar:
+    st.subheader("Update match history")
+    recent_games = st.number_input("Recent games per mode", min_value=1, max_value=1000, value=20, step=10)
+    st.caption("Checks Ranked Solo/Duo and Normal Draft. Already imported games are skipped. Uses your Riot API key in .env.")
+    if st.button("Update ranked + draft games", type="primary", use_container_width=True):
+        try:
+            with st.spinner("Importing recent ranked and draft games…"):
+                counts, detailed, failed = sync_recent_games(DB_PATH, int(recent_games))
+            st.success(f"Added {counts[420]} ranked and {counts[400]} draft games. Match history is up to date.")
+            if failed:
+                st.warning(f"Details unavailable for {len(failed)} saved games; their match results are still stored.")
+        except (RiotAPIError, OSError, sqlite3.Error, KeyError, ValueError) as exc:
+            st.error(f"Update could not finish: {exc}")
+            st.caption("Any games already imported were saved. You can retry safely.")
+        finally:
+            load_matches.clear()
+
 if not DB_PATH.exists():
-    st.info("Import matches with python main.py --games 20 to unlock performance analytics. You can still plan a draft below.")
-    render_live_draft([], get_version(), stats_rank=stats_rank)
+    st.info("Use Update ranked + draft games in the sidebar to import your match history. You can still plan a draft below.")
+    live_empty, theme_empty = st.tabs(["Live Draft", "Theme Lab"])
+    with live_empty:
+        render_live_draft([], get_version(), stats_rank=stats_rank)
+    with theme_empty:
+        render_theme_preview([], get_version())
     st.stop()
 try:
     matches = load_matches(str(DB_PATH), DB_PATH.stat().st_mtime)
@@ -142,7 +166,11 @@ except (sqlite3.Error, ValueError, json.JSONDecodeError) as exc:
     st.stop()
 if matches.empty:
     st.info("No matches have been imported yet. You can still plan a draft below.")
-    render_live_draft([], get_version(), stats_rank=stats_rank)
+    live_empty, theme_empty = st.tabs(["Live Draft", "Theme Lab"])
+    with live_empty:
+        render_live_draft([], get_version(), stats_rank=stats_rank)
+    with theme_empty:
+        render_theme_preview([], get_version())
     st.stop()
 
 version = get_version()
@@ -161,15 +189,15 @@ filtered = filtered[filtered["champion"].isin(selected)]
 result_filter = st.sidebar.selectbox("Result", ["All", "Wins", "Losses"])
 if result_filter != "All":
     filtered = filtered[filtered["win"] == (1 if result_filter == "Wins" else 0)]
-st.sidebar.caption(f"Data Dragon patch: {version} • Read-only SQLite")
+st.sidebar.caption(f"Data Dragon patch: {version} • Local SQLite")
 
 if filtered.empty:
     st.warning("No matches match these filters.")
     st.stop()
 
 # Keep the overview compact and the dense information in dedicated tabs.
-overview, champions_tab, matches_tab, draft_tab, live_tab = st.tabs(
-    ["📊 Overview", "🏆 Champions", "🗂️ Matches", "🧩 Draft & Build", "⚡ Live Draft"])
+overview, champions_tab, matches_tab, draft_tab, live_tab, theme_tab = st.tabs(
+    ["📊 Overview", "🏆 Champions", "🗂️ Matches", "🧩 Draft & Build", "⚡ Live Draft", "🎨 Theme Lab"])
 with overview:
     games = len(filtered)
     a, b, c, d = st.columns(4)
@@ -248,3 +276,6 @@ with draft_tab:
 
 with live_tab:
     render_live_draft(matches, version, stats_rank=stats_rank)
+
+with theme_tab:
+    render_theme_preview(matches, version)

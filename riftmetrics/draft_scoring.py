@@ -13,7 +13,7 @@ def load_external_priors(path, context=None):
     return blend_records(read_records(path), context)
 
 
-def score_pool(rows, pool, enemy_jungler=None, priors=None, queue_id=None, external_weight=.90, matchup_weight=.95, personal_max_weight=.15):
+def score_pool(rows, pool, enemy_jungler=None, priors=None, queue_id=None, external_weight=.90, matchup_weight=.95, personal_max_weight=.15, role="JUNGLE"):
     """Blend external matchup evidence, limited personal history and neutral uncertainty.
 
     With no queue override, combine Normal Draft (400) and Solo/Duo (420).
@@ -26,8 +26,8 @@ def score_pool(rows, pool, enemy_jungler=None, priors=None, queue_id=None, exter
     queues = (400, 420) if queue_id is None else (queue_id,)
     eligible = []
     for row in rows:
-        role = str(row.get("role") or "").upper()
-        if role != "JUNGLE" or int(row.get("queue_id") or 0) not in queues:
+        row_role = str(row.get("role") or "").upper()
+        if row_role != role or int(row.get("queue_id") or 0) not in queues:
             continue
         eligible.append(row)
     scores = []
@@ -37,7 +37,7 @@ def score_pool(rows, pool, enemy_jungler=None, priors=None, queue_id=None, exter
         wins = sum(bool(r.get("win")) for r in games)
         personal_rate = wins / n if n else None
         baseline = (wins + 5) / (n + 10)
-        matchups = [r for r in games if enemy_key and norm(r.get("enemy_jungler")) == enemy_key]
+        matchups = [r for r in games if enemy_key and norm((r.get("details") or {}).get("enemy_draft", {}).get("by_role", {}).get(role) or (r.get("enemy_jungler") if role == "JUNGLE" else None)) == enemy_key]
         mn = len(matchups)
         mw = sum(bool(r.get("win")) for r in matchups)
         personal_matchup = (mw + 8 * baseline) / (mn + 8)

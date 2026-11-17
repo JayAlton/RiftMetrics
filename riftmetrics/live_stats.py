@@ -10,6 +10,7 @@ import time
 import requests
 from riftmetrics.draft_scoring import norm
 from riftmetrics.rank_groups import resolve_ranks
+from riftmetrics.roles import ROLES
 
 CACHE = Path(__file__).resolve().parents[1] / 'data' / 'source_cache'
 TTL = 6 * 3600
@@ -54,29 +55,31 @@ def text(html):
     return re.sub(r'\s+', ' ', ' '.join(parser.parts)).strip()
 
 
-def page(source, champion, enemy, rank='Iron'):
+def page(source, champion, enemy, rank='Iron', role='JUNGLE'):
+    lane = ROLES[role][1]
     c, e = slug(champion), slug(enemy)
     tier = RANKS[rank]
     if source == 'OP.GG':
-        return f'https://op.gg/lol/champions/{c}/counters/jungle?region=global&tier={tier}'
-    return f'https://lolalytics.com/lol/{c}/vs/{e}/build/?lane=jungle&tier={tier}'
+        return f'https://op.gg/lol/champions/{c}/counters/{dict(MIDDLE="mid", BOTTOM="adc").get(role, lane)}?region=global&tier={tier}'
+    return f'https://lolalytics.com/lol/{c}/vs/{e}/build/?lane={lane}&tier={tier}'
 
 
-def record(champion, enemy, rate, games, patch, source, url, rank='Iron'):
+def record(champion, enemy, rate, games, patch, source, url, rank='Iron', role='JUNGLE'):
     if not 0 <= rate <= 100 or games < 1:
         raise ValueError('Invalid matchup rate/sample')
     return dict(champion=champion, enemy_jungler=enemy, win_rate_pct=rate,
                 sample_size=games, source=source, patch=patch, rank=rank,
-                region='All regions', queue='420', role='JUNGLE',
+                region='All regions', queue='420', role=role,
                 updated_at=datetime.now(timezone.utc).date().isoformat(),
                 expected_win_rate_pct='', source_url=url)
 
 
-def parse_opgg(html, champion, enemy, url, rank='Iron'):
+def parse_opgg(html, champion, enemy, url, rank='Iron', role='JUNGLE'):
     visible = text(html)
-    heading = re.search(r'([\w\s\'&.]+) Counters for Jungle, Patch (\d+\.\d+)', visible)
+    lane = ROLES[role][1]
+    heading = re.search(r"([\w\s'&.]+) Counters for " + (r"(?:Mid|Middle)" if role == "MIDDLE" else r"(?:ADC|Bottom)" if role == "BOTTOM" else re.escape(lane)) + r", Patch (\d+\.\d+)", visible, re.I)
     if not heading or not slug(heading[1]).endswith(slug(champion)):
-        raise ValueError('Jungle counter heading missing or wrong champion')
+        raise ValueError('Role counter heading missing or wrong champion')
     selected = re.search(r'<select\b[^>]*id="selectTier"[^>]*>(.*?)</select>', html, re.S)
     if not selected:
         raise ValueError('Source rank selector missing')
@@ -90,7 +93,7 @@ def parse_opgg(html, champion, enemy, url, rank='Iron'):
         raise ValueError('Counter table missing')
     for name, rate, games in re.findall(r"([A-Za-z'’&. ]+?)\s+(\d+(?:\.\d+)?)%\s+([\d,]+)", table[1]):
         if slug(name.strip()) == slug(enemy):
-            return record(champion, enemy, float(rate), int(games.replace(',', '')), heading[2], 'OP.GG', url, rank), []
+            return record(champion, enemy, float(rate), int(games.replace(',', '')), heading[2], 'OP.GG', url, rank, role), []
     raise ValueError('Enemy matchup absent from counter table')
 
 
@@ -168,12 +171,12 @@ def parse_build(html):
     return build
 
 
-def parse_lolalytics(html, champion, enemy, url, rank='Iron'):
+def parse_lolalytics(html, champion, enemy, url, rank='Iron', role='JUNGLE'):
     visible = text(html)
-    heading = re.search(r'([\w\s\'&.]+) jungle vs ([\w\s\'&.]+) jungle Build & Runes', visible)
+    heading = re.search(r"([\w\s'&.]+) " + re.escape(ROLES[role][1]) + r" vs ([\w\s'&.]+) " + re.escape(ROLES[role][1]) + r" Build & Runes", visible)
     patch = re.search(r'\bPatch\s+(\d+\.\d+)', visible)
     if not heading or not patch or not slug(heading[1]).endswith(slug(champion)) or slug(heading[2]) != slug(enemy):
-        raise ValueError('Jungle matchup identity missing')
+        raise ValueError('Role matchup identity missing')
     if not re.search(r'\b' + re.escape(LOL_RANK_LABELS.get(rank, rank.upper())) + r'\s+Patch\s+\d+\.\d+', visible):
         raise ValueError(f'Source did not return requested rank: {rank}')
     matchup = re.search(r'wins against\s+.+?\s+(\d+(?:\.\d+)?)% of the time', visible)
@@ -185,12 +188,12 @@ def parse_lolalytics(html, champion, enemy, url, rank='Iron'):
     items = []
     if section:
         images = Images(); images.feed(section[1]); items = images.items
-    row = record(champion, enemy, float(matchup[1]), int(sample[2].replace(',', '')), patch[1], 'Lolalytics', url, rank)
+    row = record(champion, enemy, float(matchup[1]), int(sample[2].replace(',', '')), patch[1], 'Lolalytics', url, rank, role)
     return row, items[:3]
 
 
-def fetch_one(source, champion, enemy, cache_dir=CACHE, force=False, rank='Iron'):
-    url = page(source, champion, enemy, rank)
+def fetch_one(source, champion, enemy, cache_dir=CACHE, force=False, rank='Iron', role='JUNGLE'):
+    url = page(source, champion, enemy, rank, role)
     cache_dir = Path(cache_dir)
     path = cache_dir / (sha256(url.encode()).hexdigest() + '.json')
     cached = None
@@ -208,7 +211,7 @@ def fetch_one(source, champion, enemy, cache_dir=CACHE, force=False, rank='Iron'
             response.raise_for_status()
             # Store public HTML too: OP.GG contains every enemy matchup for this champion.
             parser = parse_opgg if source == 'OP.GG' else parse_lolalytics
-            parser(response.text, champion, enemy, url, rank)
+            parser(response.text, champion, enemy, url, rank, role)
             result = dict(html=response.text, fetched_at=now, attempted_at=now)
         except (requests.RequestException, ValueError) as exc:
             result = dict(result, attempted_at=now, error=f'{source}: {type(exc).__name__}: {str(exc)[:160]}')
@@ -223,7 +226,7 @@ def fetch_one(source, champion, enemy, cache_dir=CACHE, force=False, rank='Iron'
         return dict(source=source, champion=champion, requested_rank=rank, error=result.get('error', 'No source data'), record=None, items=[])
     try:
         parser = parse_opgg if source == 'OP.GG' else parse_lolalytics
-        row, items = parser(result['html'], champion, enemy, url, rank)
+        row, items = parser(result['html'], champion, enemy, url, rank, role)
         row['updated_at'] = datetime.fromtimestamp(result['fetched_at'], timezone.utc).date().isoformat()
         stale = now - result['fetched_at'] >= TTL
         build = parse_build(result['html']) if source == 'Lolalytics' else None
@@ -234,9 +237,9 @@ def fetch_one(source, champion, enemy, cache_dir=CACHE, force=False, rank='Iron'
         return dict(source=source, champion=champion, requested_rank=rank, error=f'{source}: {exc}', record=None, items=[])
 
 
-def fetch_pool(pool, enemy, sources=SOURCES, cache_dir=CACHE, force=False, rank='Iron'):
+def fetch_pool(pool, enemy, sources=SOURCES, cache_dir=CACHE, force=False, rank='Iron', role='JUNGLE'):
     jobs = [(source, champion, tier) for champion in dict.fromkeys(pool)
             for source in sources for tier in resolve_ranks(rank)]
-    def run(job): return fetch_one(job[0], job[1], enemy, cache_dir, force, job[2])
+    def run(job): return fetch_one(job[0], job[1], enemy, cache_dir, force, job[2], role=role)
     with ThreadPoolExecutor(max_workers=6) as executor:
         return list(executor.map(run, jobs))

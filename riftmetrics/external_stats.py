@@ -16,7 +16,7 @@ def cohort(row):
                  ('patch', 'rank', 'region', 'queue', 'role'))
 
 
-def read_records(path):
+def read_records(path, role='JUNGLE'):
     path = Path(path)
     if not path.exists():
         return []
@@ -29,7 +29,7 @@ def read_records(path):
                     continue
                 if not math.isfinite(rate) or not 0 <= rate <= 100 or sample < 1:
                     continue
-                if row.get('role') and row['role'].upper() != 'JUNGLE':
+                if role is not None and (row.get('role') or 'JUNGLE').upper() != role:
                     continue
                 if row.get('updated_at'):
                     date.fromisoformat(row['updated_at'])
@@ -108,7 +108,7 @@ def blend_records(records, context=None):
 def save_record(path, record):
     """Upsert one source/cohort snapshot atomically, preserving other matchups."""
     path = Path(path)
-    existing = read_records(path)
+    existing = read_records(path, role=None)
     key = lambda r: (norm(r['champion']), norm(r['enemy_jungler']),
                      (r.get('source') or '').casefold(), cohort(r))
     rows = [r for r in existing if key(r) != key(record)] + [record]

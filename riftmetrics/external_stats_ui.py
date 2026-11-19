@@ -14,7 +14,7 @@ from riftmetrics.rank_groups import resolve_ranks, rank_label
 SNAPSHOTS = Path(__file__).with_name('resources') / 'matchup_snapshots.csv'
 
 
-def render_external_stats(path, catalog, enemy_jungler, pool, rank=None, role="JUNGLE", namespace=""):
+def render_external_stats(path, catalog, enemy_jungler, pool, rank=None, role="JUNGLE", namespace="", patch=None):
     label, lane, _ = ROLES[role]
     if rank is None:
         rank = select_rank_scope()
@@ -30,12 +30,12 @@ def render_external_stats(path, catalog, enemy_jungler, pool, rank=None, role="J
     refresh = st.button('Refresh matchup data', disabled=not enemy_jungler, key=namespace + "refresh_sources")
     if not enemy_jungler and st.button('Prepare pool cache before draft', key=namespace + "prepare_cache"):
         with st.spinner('Caching OP.GG role counter tables for your pool…'):
-            prepared = fetch_pool(pool, ROLES[role][2][-1], ['OP.GG'], rank=rank, role=role)
+            prepared = fetch_pool(pool, ROLES[role][2][-1], ['OP.GG'], rank=rank, role=role, patch=patch)
         count = sum(bool(r.get('record')) for r in prepared)
         st.info(f'Cached {count}/{len(prepared)} rank-specific champion counter tables. Each table covers all listed opposing champions; builds load when an enemy is selected.')
     if auto and enemy_jungler and sources:
         with st.spinner('Loading role matchup stats (cached results are reused)…'):
-            fetched = fetch_pool(pool, enemy_jungler, sources, force=refresh, rank=rank, role=role)
+            fetched = fetch_pool(pool, enemy_jungler, sources, force=refresh, rank=rank, role=role, patch=patch)
         valid = [r for r in fetched if r.get('record')]
         fresh = [r for r in valid if not r.get('stale')]
         st.caption(f'{len(fresh)}/{len(fetched)} source lookups available within the 6-hour cache window. First lookup needs internet; repeat drafts reuse local data.')
@@ -54,14 +54,14 @@ def render_external_stats(path, catalog, enemy_jungler, pool, rank=None, role="J
             row = result['record']
             records.append(dict(row, rate=row['win_rate_pct'] / 100, sample=row['sample_size'], expected_rate=None))
     with st.expander('Matchup evidence and manual fallback'):
-        priors = render_evidence(path, catalog, enemy_jungler, pool, records, rank, role, namespace=namespace)
+        priors = render_evidence(path, catalog, enemy_jungler, pool, records, rank, role, namespace=namespace, selected_patch=patch)
     if len(ranks) > 1 and enemy_jungler:
         covered = sum((norm(champ), norm(enemy_jungler)) in priors for champ in pool)
         st.caption(f'Complete selected-rank evidence: {covered}/{len(pool)} pool champions. Largest source sample is a reported count, not a verified unique-match total across sites.')
     return priors, fetched
 
 
-def render_evidence(path, catalog, enemy_jungler, pool, live_records, rank='Iron', role='JUNGLE', namespace=''):
+def render_evidence(path, catalog, enemy_jungler, pool, live_records, rank='Iron', role='JUNGLE', namespace='', selected_patch=None):
     lane = ROLES[role][1]
     ranks = resolve_ranks(rank)
     label = rank_label(rank)
@@ -97,6 +97,8 @@ def render_evidence(path, catalog, enemy_jungler, pool, live_records, rank='Iron
                     except OSError as exc:
                         st.error(f'Unable to save snapshot: {exc}')
     records = read_records(SNAPSHOTS, role=role) + read_records(path, role=role) + [r for r in live_records if r.get('role') == role]
+    if selected_patch:
+        records = [r for r in records if r.get("patch") == selected_patch]
     records = group_rank_records(records, rank)
     if len(ranks) > 1:
         st.caption('Rank rates are weighted by reported games within each source. All selected ranks must be available on the same patch for a source to contribute. Counts across websites are not added together.')
@@ -116,8 +118,8 @@ def render_evidence(path, catalog, enemy_jungler, pool, live_records, rank='Iron
     slug = lambda x: quote(norm(x).replace('&', '').replace('.', ''))
     c, e = slug(candidate), slug(enemy_jungler)
     link_rank = ranks[0]
-    st.markdown(f"Check sources: [OP.GG]({page('OP.GG', candidate, enemy_jungler, link_rank, role)}) | "
-                f"[Lolalytics]({page('Lolalytics', candidate, enemy_jungler, link_rank, role)})")
+    st.markdown(f"Check sources: [OP.GG]({page('OP.GG', candidate, enemy_jungler, link_rank, role, selected_patch)}) | "
+                f"[Lolalytics]({page('Lolalytics', candidate, enemy_jungler, link_rank, role, selected_patch)})")
     prior = priors.get((norm(candidate), norm(enemy_jungler)))
     if not prior:
         st.info(f'No saved evidence for {candidate} versus {enemy_jungler} in this cohort. Missing data is not treated as a favorable matchup.')

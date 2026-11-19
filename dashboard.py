@@ -6,6 +6,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 from riftmetrics.rank_ui import select_rank_scope
+from riftmetrics.patch_ui import select_stats_patch
 from riftmetrics.api import RiotAPIError
 from riftmetrics.sync import sync_recent_games
 from riftmetrics.theme_preview import render_theme_preview
@@ -22,6 +23,7 @@ apply_theme()
 st.title("🎯 RiftMetrics")
 st.caption("Your draft and ranked performance • Champion matchups • Stored locally in SQLite")
 stats_rank = select_rank_scope()
+stats_patch = select_stats_patch()
 
 
 @st.cache_data(ttl=20)
@@ -149,7 +151,7 @@ if not DB_PATH.exists():
     st.info("Use Update ranked + draft games in the sidebar to import your match history. You can still plan a draft below.")
     theme_empty, settings_empty = st.tabs(["Draft", "Weights and Settings"])
     with theme_empty:
-        render_theme_preview([], get_version(), stats_rank=stats_rank, settings_container=settings_empty)
+        render_theme_preview([], get_version(), stats_rank=stats_rank, settings_container=settings_empty, stats_patch=stats_patch)
     st.stop()
 try:
     matches = load_matches(str(DB_PATH), DB_PATH.stat().st_mtime)
@@ -160,7 +162,7 @@ if matches.empty:
     st.info("No matches have been imported yet. You can still plan a draft below.")
     theme_empty, settings_empty = st.tabs(["Draft", "Weights and Settings"])
     with theme_empty:
-        render_theme_preview([], get_version(), stats_rank=stats_rank, settings_container=settings_empty)
+        render_theme_preview([], get_version(), stats_rank=stats_rank, settings_container=settings_empty, stats_patch=stats_patch)
     st.stop()
 
 version = get_version()
@@ -265,4 +267,4 @@ with draft_tab:
 
 
 with theme_tab:
-    render_theme_preview(matches, version, stats_rank=stats_rank, settings_container=settings_tab)
+    render_theme_preview(matches, version, stats_rank=stats_rank, settings_container=settings_tab, stats_patch=stats_patch)

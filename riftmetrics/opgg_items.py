@@ -9,7 +9,7 @@ import time
 
 import requests
 
-from riftmetrics.live_stats import CACHE, TTL, RANKS, page, slug, text
+from riftmetrics.live_stats import CACHE, TTL, RANKS, page, slug, text, validate_patch
 from riftmetrics.roles import ROLES
 
 
@@ -88,8 +88,8 @@ def parse_items(html, champion, role, rank):
     return dict(champion=champion, role=role, rank=rank, patch=match[3], rows=parser.rows)
 
 
-def fetch_items(champion, role='JUNGLE', rank='Iron', force=False, cache_dir=CACHE):
-    url = page('OP.GG', champion, '', rank, role).replace('/counters/', '/items/')
+def fetch_items(champion, role='JUNGLE', rank='Iron', force=False, cache_dir=CACHE, patch=None):
+    url = page('OP.GG', champion, '', rank, role, patch).replace('/counters/', '/items/')
     path = Path(cache_dir) / ('items_' + sha256(url.encode()).hexdigest() + '.json')
     try:
         cached = json.loads(path.read_text(encoding='utf-8'))
@@ -97,7 +97,8 @@ def fetch_items(champion, role='JUNGLE', rank='Iron', force=False, cache_dir=CAC
         cached = {}
     data = cached.get('data') or {}
     if (data.get('role') != role or data.get('rank') != rank
-            or slug(data.get('champion', '')) != slug(champion)):
+            or slug(data.get('champion', '')) != slug(champion)
+            or (patch and data.get('patch') != patch)):
         cached = {}
     now = time.time()
     error = None
@@ -106,6 +107,7 @@ def fetch_items(champion, role='JUNGLE', rank='Iron', force=False, cache_dir=CAC
             response = requests.get(url, timeout=(3, 8), headers={'User-Agent': 'RiftMetrics/0.1 (personal League analytics)'})
             response.raise_for_status()
             parsed = parse_items(response.text, champion, role, rank)
+            validate_patch(parsed, patch)
             cached = dict(data=parsed, fetched_at=now)
             try:
                 path.parent.mkdir(parents=True, exist_ok=True)

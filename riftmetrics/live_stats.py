@@ -55,13 +55,23 @@ def text(html):
     return re.sub(r'\s+', ' ', ' '.join(parser.parts)).strip()
 
 
-def page(source, champion, enemy, rank='Iron', role='JUNGLE'):
+def page(source, champion, enemy, rank='Iron', role='JUNGLE', patch=None):
     lane = source_lane(role, source)
     c, e = slug(champion), slug(enemy)
     tier = RANKS[rank]
+    suffix = ''
+    if patch:
+        if not re.fullmatch(r'\d+\.\d+', patch):
+            raise ValueError('Patch must use major.minor format, such as 16.22.')
+        suffix = f'&patch={patch}'
     if source == 'OP.GG':
-        return f'https://op.gg/lol/champions/{c}/counters/{lane}?region=global&tier={tier}'
-    return f'https://lolalytics.com/lol/{c}/vs/{e}/build/?lane={lane}&vslane={lane}&tier={tier}'
+        return f'https://op.gg/lol/champions/{c}/counters/{lane}?region=global&tier={tier}{suffix}'
+    return f'https://lolalytics.com/lol/{c}/vs/{e}/build/?lane={lane}&vslane={lane}&tier={tier}{suffix}'
+
+
+def validate_patch(record, patch):
+    if patch and record.get('patch') != patch:
+        raise ValueError(f"Source returned patch {record.get('patch')} instead of requested {patch}.")
 
 
 def record(champion, enemy, rate, games, patch, source, url, rank='Iron', role='JUNGLE'):
@@ -192,8 +202,8 @@ def parse_lolalytics(html, champion, enemy, url, rank='Iron', role='JUNGLE'):
     return row, items[:3]
 
 
-def fetch_one(source, champion, enemy, cache_dir=CACHE, force=False, rank='Iron', role='JUNGLE'):
-    url = page(source, champion, enemy, rank, role)
+def fetch_one(source, champion, enemy, cache_dir=CACHE, force=False, rank='Iron', role='JUNGLE', patch=None):
+    url = page(source, champion, enemy, rank, role, patch)
     cache_dir = Path(cache_dir)
     path = cache_dir / (sha256(url.encode()).hexdigest() + '.json')
     cached = None
@@ -211,7 +221,8 @@ def fetch_one(source, champion, enemy, cache_dir=CACHE, force=False, rank='Iron'
             response.raise_for_status()
             # Store public HTML too: OP.GG contains every enemy matchup for this champion.
             parser = parse_opgg if source == 'OP.GG' else parse_lolalytics
-            parser(response.text, champion, enemy, url, rank, role)
+            parsed, _ = parser(response.text, champion, enemy, url, rank, role)
+            validate_patch(parsed, patch)
             result = dict(html=response.text, fetched_at=now, attempted_at=now)
         except (requests.RequestException, ValueError) as exc:
             result = dict(result, attempted_at=now, error=f'{source}: {type(exc).__name__}: {str(exc)[:160]}')
@@ -227,6 +238,7 @@ def fetch_one(source, champion, enemy, cache_dir=CACHE, force=False, rank='Iron'
     try:
         parser = parse_opgg if source == 'OP.GG' else parse_lolalytics
         row, items = parser(result['html'], champion, enemy, url, rank, role)
+        validate_patch(row, patch)
         row['updated_at'] = datetime.fromtimestamp(result['fetched_at'], timezone.utc).date().isoformat()
         stale = now - result['fetched_at'] >= TTL
         build = parse_build(result['html']) if source == 'Lolalytics' else None
@@ -237,9 +249,9 @@ def fetch_one(source, champion, enemy, cache_dir=CACHE, force=False, rank='Iron'
         return dict(source=source, champion=champion, requested_rank=rank, error=f'{source}: {exc}', record=None, items=[])
 
 
-def fetch_pool(pool, enemy, sources=SOURCES, cache_dir=CACHE, force=False, rank='Iron', role='JUNGLE'):
+def fetch_pool(pool, enemy, sources=SOURCES, cache_dir=CACHE, force=False, rank='Iron', role='JUNGLE', patch=None):
     jobs = [(source, champion, tier) for champion in dict.fromkeys(pool)
             for source in sources for tier in resolve_ranks(rank)]
-    def run(job): return fetch_one(job[0], job[1], enemy, cache_dir, force, job[2], role=role)
+    def run(job): return fetch_one(job[0], job[1], enemy, cache_dir, force, job[2], role=role, **({"patch": patch} if patch else {}))
     with ThreadPoolExecutor(max_workers=6) as executor:
         return list(executor.map(run, jobs))

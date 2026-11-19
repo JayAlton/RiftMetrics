@@ -15,8 +15,9 @@ from riftmetrics.roles import ROLES
 from riftmetrics.static_data import champion_image, readable_champion, champion_catalog
 
 
-def render_theme_preview(matches, version, stats_rank="Iron", settings_container=None):
+def render_theme_preview(matches, version, stats_rank="Iron", settings_container=None, stats_patch=None):
     st.subheader("Draft Room")
+    st.caption(f"Statistics patch: {stats_patch or 'Latest available from source'}. Personal history includes your stored games across patches.")
     st.caption("Draft Room combines your role history with same-role matchup evidence. Select an opponent to retrieve matchup stats, items, and runes.")
     left, right = st.columns(2)
     with left:
@@ -29,7 +30,7 @@ def render_theme_preview(matches, version, stats_rank="Iron", settings_container
     if pool:
         rows = matches.to_dict("records") if hasattr(matches, "to_dict") else list(matches)
         with st.expander("Ban recommendations", expanded=True):
-            render_ban_assistant(rows, pool, role, stats_rank, version)
+            render_ban_assistant(rows, pool, role, stats_rank, version, patch=stats_patch)
     enemy_pick = st.selectbox(f"Enemy {label.lower()}", ["Unknown"] + catalog, key=f"lab_enemy_{role}")
     enemy = None if enemy_pick == "Unknown" else enemy_pick
     pool = [c for c in pool if not enemy or norm(c) != norm(enemy)]
@@ -50,7 +51,7 @@ def render_theme_preview(matches, version, stats_rank="Iron", settings_container
         st.caption("External influence scales down below 1,000 source games. Personal influence scales with your role history; missing evidence stays neutral. Scores are relative rankings, not win probabilities.")
         priors, fetched = render_external_stats(
             Path(__file__).resolve().parents[1] / "data" / "matchup_priors.csv",
-            catalog, enemy, pool, rank=stats_rank, role=role, namespace="lab_")
+            catalog, enemy, pool, rank=stats_rank, role=role, namespace="lab_", patch=stats_patch)
     rows = matches.to_dict("records") if hasattr(matches, "to_dict") else list(matches)
     results = score_pool(rows, pool, enemy, priors, role=role, external_weight=external_weight / 100, matchup_weight=matchup_weight / 100, personal_max_weight=personal_weight / 100)
     with right:
@@ -140,7 +141,7 @@ def render_theme_preview(matches, version, stats_rank="Iron", settings_container
     else:
         st.info("Select an enemy and enable Lolalytics in Matchup sources to load items and runes when available.")
     if opgg_enabled and build_rank:
-        render_opgg_items(pick, role, build_rank, version)
+        render_opgg_items(pick, role, build_rank, version, patch=stats_patch)
     with st.expander("Full champion comparison"):
         st.dataframe([{
             'Champion': r['champion'], 'Score': round(r['score'] * 100, 1),

@@ -4,13 +4,13 @@ import streamlit as st
 from riftmetrics.static_data import item_image
 
 
-def render_opgg_items(champion, role, rank, version):
+def render_opgg_items(champion, role, rank, version, patch=None):
     from riftmetrics.opgg_items import fetch_items
 
     st.markdown('#### OP.GG item explorer')
     refresh = st.button('Refresh OP.GG items', key='draft_opgg_refresh')
     with st.spinner('Loading OP.GG item statistics…'):
-        result = fetch_items(champion, role, rank, force=refresh)
+        result = fetch_items(champion, role, rank, force=refresh, patch=patch)
     if result['error']:
         st.warning(f"OP.GG item retrieval: {result['error']}")
     data = result['data']

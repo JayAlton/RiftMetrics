@@ -7,7 +7,7 @@ import streamlit as st
 
 from riftmetrics.draft_scoring import norm
 from riftmetrics.external_stats import group_rank_records, blend_records
-from riftmetrics.live_stats import page, text, parse_opgg, record
+from riftmetrics.live_stats import page, text, parse_opgg, record, validate_patch
 from riftmetrics.rank_groups import resolve_ranks
 from riftmetrics.static_data import champion_image, readable_champion
 
@@ -66,14 +66,14 @@ def recommend_bans(rows, pool, planned, role, priors=None):
     return sorted(results, key=lambda r: (r['pressure'], r['encounters']), reverse=True), backups, stats
 
 
-def parse_counter_table(html, champion, role, rank):
+def parse_counter_table(html, champion, role, rank, patch=None):
     table = text(html).split('Search a champion Win rate Games', 1)
     if len(table) != 2:
         raise ValueError('OP.GG counter table unavailable.')
     entries = re.findall(r"([A-Za-z'’&. ]+?)\s+(\d+(?:\.\d+)?)%\s+([\d,]+)", table[1])
     if not entries:
         raise ValueError('OP.GG counter rows unavailable.')
-    url = page('OP.GG', champion, '', rank, role)
+    url = page('OP.GG', champion, '', rank, role, patch)
     # Reuse the existing champion, role and rank validation before accepting rows.
     validated, _ = parse_opgg(html, champion, entries[0][0].strip(), url, rank, role)
     return [record(champion, name.strip(), float(rate), int(games.replace(',', '')),
@@ -82,14 +82,17 @@ def parse_counter_table(html, champion, role, rank):
 
 
 @st.cache_data(ttl=6 * 3600, show_spinner=False)
-def load_ban_evidence(champions, role, ranks):
+def load_ban_evidence(champions, role, ranks, patch=None):
     def retrieve(job):
         champion, rank = job
         try:
-            response = requests.get(page('OP.GG', champion, '', rank, role), timeout=(3, 8),
+            response = requests.get(page('OP.GG', champion, '', rank, role, patch), timeout=(3, 8),
                                     headers={'User-Agent': 'RiftMetrics/0.1 (personal League analytics)'})
             response.raise_for_status()
-            return parse_counter_table(response.text, champion, role, rank), None
+            parsed = parse_counter_table(response.text, champion, role, rank, patch)
+            for row in parsed:
+                validate_patch(row, patch)
+            return parsed, None
         except (requests.RequestException, ValueError) as exc:
             return [], f'{champion} / {rank}: {exc}'
     with ThreadPoolExecutor(max_workers=4) as executor:
@@ -97,17 +100,17 @@ def load_ban_evidence(champions, role, ranks):
     return [r for rows, _ in results for r in rows], [error for _, error in results if error]
 
 
-def render_ban_assistant(rows, pool, role, rank, version):
+def render_ban_assistant(rows, pool, role, rank, version, patch=None):
     st.markdown('### Who should I ban?')
     _, stats = personal_pool(rows, pool, role)
     strongest = sorted(pool, key=lambda c: (stats[c]['rate'], stats[c]['games']), reverse=True)
     planned = st.selectbox('Who do you feel like playing?', strongest, key=f'ban_planned_{role}')
     st.caption('Defaults to your strongest champion by smoothed role win rate. Bans prioritize your intended pick (80%) and your two strongest backups (20%); pool champions are protected from bans.')
     _, backups, _ = recommend_bans(rows, pool, planned, role)
-    evidence_key = (planned, tuple(backups), role, tuple(resolve_ranks(rank)))
+    evidence_key = (planned, tuple(backups), role, tuple(resolve_ranks(rank)), patch)
     if st.button('Load OP.GG ban matchups', key='load_ban_matchups'):
         with st.spinner('Checking counters to your intended pick and strongest backups…'):
-            records, errors = load_ban_evidence((planned, *backups), role, evidence_key[-1])
+            records, errors = load_ban_evidence((planned, *backups), role, evidence_key[-2], patch=patch)
         st.session_state['ban_evidence'] = (evidence_key, records, errors)
     saved = st.session_state.get('ban_evidence')
     records, errors = (saved[1], saved[2]) if saved and saved[0] == evidence_key else ([], [])

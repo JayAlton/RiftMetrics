@@ -73,14 +73,28 @@ def render_live_draft(matches, version, stats_rank=None):
             "Matchup influence %": round(r["external_weight"] * 100, 1),
             "Score": round(r["score"] * 100, 1),
         })
+    pick_key = f"draft_build_pick_{role}"
+    table_key = f"draft_recommendations_{role}"
+
+    def select_champion():
+        selected = st.session_state[table_key].selection.rows
+        if selected:
+            st.session_state[pick_key] = results[selected[0]]["champion"]
+
+    st.caption("Click a champion's portrait or row to select your pick and view their build below.")
     st.dataframe(table, column_config={"Icon": st.column_config.ImageColumn("Portrait")},
-                 hide_index=True, use_container_width=True)
+                 hide_index=True, use_container_width=True, key=table_key,
+                 on_select=select_champion, selection_mode="single-row")
     st.bar_chart(pd.DataFrame({"Champion": [r["champion"] for r in results], "Score": [r["score"] * 100 for r in results]}).set_index("Champion"), horizontal=True)
     st.caption("External evidence is restricted to the selected cohort. Patch and date are displayed for review; snapshots require updates. Each source is capped at 1,000 games for blending; overlapping samples are not added together.")
     st.caption("Relative scores use smoothed personal win rate and head-to-head results. External percentages come from automatic sources or saved fallback snapshots. Only the selected role matchup is evaluated; team composition is outside this view.")
 
     st.markdown("#### Build for your pick")
-    pick = st.selectbox("Champion to build", [r["champion"] for r in results])
+    pick_options = [r["champion"] for r in results]
+    if st.session_state.get(pick_key) not in pick_options:
+        st.session_state[pick_key] = pick_options[0]
+    pick = st.selectbox("Champion to build", pick_options, key=pick_key,
+                        format_func=readable_champion)
     build_ranks = resolve_ranks(stats_rank if stats_rank is not None else (st.session_state.get('draft_custom_ranks', []) if st.session_state.get('draft_stats_rank') == 'Custom rank group' else st.session_state.get('draft_stats_rank', 'Iron')))
     build_rank = st.selectbox('Build and rune rank', build_ranks) if len(build_ranks) > 1 else (build_ranks[0] if build_ranks else None)
     if len(build_ranks) > 1:
